@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6a9962e3fa1ced54ca903fcd414b0c91, type: 3}
+  m_Name: ShopTestSkill05
+  m_EditorClassIdentifier: 
+  _icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
+  _skillName: ShopTestSkill05
+  _skillDescription: "Shop grid test skill"
+  _levelGrowth: []
+  _castTime: 0.5
+  _cooldown: 4
+  motionClip: {fileID: 7400000, guid: 008c083fc353fbb44839ff523b1941b4, type: 2}
+  _aimMode: 0
+  _rotationMode: 0
+  _useEffectPrefab: {fileID: 0}
+  _hitEffectPrefab: {fileID: 0}
+  _effectOffset: {x: 0, y: 0, z: 0}
+  _hitbox:
+    _hitShape: 0
+    _offset: {x: 0, y: 0, z: 3}
+    _boxSize: {x: 5, y: 5, z: 5}
+    _radius: 5
+  _targetMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  _blockingMask:
+    serializedVersion: 2
+    m_Bits: 0
+  _damageMultiplier: 2
+  _spellPowerMultiplier: 0

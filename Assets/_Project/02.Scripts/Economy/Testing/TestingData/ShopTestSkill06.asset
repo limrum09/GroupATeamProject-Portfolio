@@ -1,0 +1,59 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ed9bd986598585a498fc35bfe555a129, type: 3}
+  m_Name: ShopTestSkill06
+  m_EditorClassIdentifier: 
+  _icon: {fileID: 10901, guid: 0000000000000000f000000000000000, type: 0}
+  _skillName: ShopTestSkill06
+  _skillDescription: "Shop grid test skill"
+  _levelGrowth:
+  - _attackMultiplierIncrease: 110
+    _spellMultiplierIncrease: 110
+    _cooldownReduction: 0
+  - _attackMultiplierIncrease: 210
+    _spellMultiplierIncrease: 210
+    _cooldownReduction: 0
+  - _attackMultiplierIncrease: 310
+    _spellMultiplierIncrease: 310
+    _cooldownReduction: 0
+  - _attackMultiplierIncrease: 410
+    _spellMultiplierIncrease: 410
+    _cooldownReduction: 0
+  _castTime: 0.5
+  _cooldown: 4
+  motionClip: {fileID: 7400000, guid: dd86bdfed8685ad4daa07aaa8ed4ee85, type: 2}
+  _aimMode: 1
+  _rotationMode: 0
+  _useEffectPrefab: {fileID: 4503146732357069561, guid: 0f86070729e96334197b9fda689a23e4, type: 3}
+  _hitEffectPrefab: {fileID: 3697109899910493501, guid: 222a7930145230a42a287fab2890fc33, type: 3}
+  _effectOffset: {x: 0, y: 0, z: 0}
+  _range: 15
+  _blockingMask:
+    serializedVersion: 2
+    m_Bits: 0
+  _targetMask:
+    serializedVersion: 2
+    m_Bits: 128
+  _damageMultiplier: 2
+  _spellPowerMultiplier: 0
+  _useSplash: 0
+  _splashHitbox:
+    _hitShape: 0
+    _offset: {x: 0, y: 0, z: 0}
+    _boxSize: {x: 2, y: 2, z: 2}
+    _radius: 3
+  _useProjectile: 1
+  _projectilePrefab: {fileID: 1051021017431663830, guid: f8cc62f6edf50fb428778b0753c0c46a, type: 3}
+  _projectileSpeed: 12
+  _projectileRadius: 0.15
+  _projectileLifetime: 3
+  _projectileSpawnOffset: {x: 0, y: 0, z: 0}

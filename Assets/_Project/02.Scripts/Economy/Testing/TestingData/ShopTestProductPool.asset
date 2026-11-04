@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 403c09eca69f2a24bb3057f8193a224b, type: 3}
+  m_Name: "ShopTestProductPool"
+  m_EditorClassIdentifier: ""
+  _products:
+    - _skill: {fileID: 11400000, guid: 5196ba7b49fcd4f498a7dfce82ae5bb6, type: 2}
+      _price: 115
+    - _skill: {fileID: 11400000, guid: 524d6a67b7b2ad84181f57b2b842355a, type: 2}
+      _price: 115
+    - _skill: {fileID: 11400000, guid: a661e06d6c8c8234b80566aaee40a509, type: 2}
+      _price: 115
+    - _skill: {fileID: 11400000, guid: df920d3383144d53b9134ee710ba192a, type: 2}
+      _price: 232
+    - _skill: {fileID: 11400000, guid: dfad4bfd7e7142c6a52396e8b69917b9, type: 2}
+      _price: 154
+    - _skill: {fileID: 11400000, guid: 259da006c06d4127bea0eaaa636e377a, type: 2}
+      _price: 320
