@@ -2,11 +2,11 @@
 
 > Unity 6 · URP 기반 싱글 플레이 쿼터뷰 액션 로그라이트 — 팀 프로젝트 개인 기여 포트폴리오
 
-플레이어가 스킬을 사용해 전투하고, 런 중 성장과 영구 강화를 이어 가는 액션 로그라이트 팀 프로젝트입니다.
+스킬을 사용해 적과 싸우며, 레벨은 플레이할 때마다 1부터 시작합니다. 구매한 영구 강화는 다음 플레이에도 유지됩니다.
 
-팀장으로서 플레이어·스킬·성장·퀘스트·프로필 저장과 주요 UI를 개발하고, PR 병합 및 팀원 기능과의 연결 작업을 담당했습니다. 이 README는 **스킬 상태 보존, 퀘스트 진행·수령 처리, 프로필 저장 재시도**를 중심으로 개인 구현을 설명합니다. 나머지 기여는 부록에 정리했습니다.
+팀장으로 참여해 플레이어와 주요 게임 기능을 개발하고, 팀원들이 만든 기능을 연결하는 작업을 맡았습니다.
 
-## Project Info
+## 프로젝트 정보
 
 | 항목 | 내용 |
 | --- | --- |
@@ -15,264 +15,126 @@
 | 렌더 파이프라인 | Universal Render Pipeline |
 | 언어 | C# |
 | 개발 형태 | 팀 프로젝트 |
-| 담당 역할 | 팀장 · 게임플레이 및 UI 프로그래밍 · 기능 통합 |
-| 저장소 구성 | 개인 기여 설명과 프로젝트 스크립트 |
 
-## My Role
+## 담당 작업
 
-| 구분 | 담당 범위 |
+| 구분 | 담당 작업 |
 | --- | --- |
-| 본인 주도 구현 | 플레이어 조작, 스킬 상태·실행·피해 계산, 성장·영구 강화, 퀘스트, 주요 로비·플레이어 UI, 프로필 저장·인증, 개발 도구 |
-| 공동 작업 | 공용 전투 컨트롤러, 게임 흐름·씬 전환, 로비 UI 통합, 세션 초기화, 상점·퀘스트·스킬 연결 |
-| 팀원 주도 구현 | 적 AI·스폰·애니메이션, 맵·노드 진행, 상점 주요 기능, 캐릭터 스토리, 메뉴·설정, 런 점수·결산 |
+| 주로 맡은 작업 | 플레이어 조작, 스킬, 성장·영구 강화, 퀘스트, 주요 UI, 프로필 저장·인증, 개발 도구 |
+| 함께 작업한 부분 | 공용 전투 처리, 게임 흐름과 씬 전환, 로비 UI 통합, 플레이 시작 시 초기화, 상점·퀘스트·스킬 연결 |
+| 팀원이 주로 맡은 작업 | 적 AI와 스폰·애니메이션, 맵 진행, 상점 주요 기능, 캐릭터 스토리, 메뉴·설정, 점수·결산 |
 
-## Core Implementation Summary
+## 주요 기능
 
-| 핵심 구현 | 다룬 문제 | 주요 클래스 |
-| --- | --- | --- |
-| Skill — 상태 보존과 발동 기준 | 슬롯 변경·강화·지연 적중 사이에서 상태와 계산 기준 유지 | SkillInstance, SkillLoadout, SkillExecutionContext, SkillDamageResolver |
-| Quest — 진행과 수령 구분 | 목표 유형별 계산, 미정산 진행 분리, 수령 자격 검증 | ObjectiveEvaluator, QuestProgress, QuestRecord, QuestManager, QuestActionService |
-| Save — 실패 데이터 재시도 | 변경 데이터 고정, 실패 상태 유지, 동일 데이터 재기록 | MetaSaveChanges, MetaProfileSaveCoordinator, IMetaProfileStore |
+### 플레이어 조작과 스킬
 
-## Key Features
+플레이어가 마우스로 지정한 위치로 이동하거나 적을 공격하고, 이동 스킬과 QWER 슬롯의 스킬을 사용할 수 있도록 했습니다. 플레이어 입력·이동·애니메이션과 스킬 실행·피해 계산을 맡았으며, 공용 전투 처리의 후속 수정과 적 공격 연결은 팀원과 함께 작업했습니다.
 
-### 1. Skill — 상태를 보존하는 스킬 실행 시스템
+스킬바에는 장착한 스킬의 아이콘과 남은 쿨타임을 표시하고, 마우스를 올리면 이름·레벨·설명을 보여줍니다. 아이콘을 드래그해 슬롯을 바꾸거나, 강화 비용을 확인하고 선택한 스킬을 강화할 수 있습니다. 전투 중 체력과 플레이어 프로필을 표시하는 HUD도 구현했습니다.
 
-스킬의 설정 데이터, 런타임 상태, 슬롯 관리와 피해 계산을 구현했습니다. 공용 전투 컨트롤러의 후속 수정과 적 공격 연결은 팀원과 함께 작업했습니다.
+강화한 스킬을 다른 슬롯으로 옮겨도 강화 레벨과 남은 쿨타임은 그대로 이어집니다. 쿨타임을 줄이는 강화를 구매한 경우에는 다음 사용부터 적용됩니다.
 
-스킬 슬롯을 옮기더라도 강화 레벨과 남은 쿨타임은 유지되어야 합니다. 이를 위해 스킬 설정은 `SkillDefinition`, 플레이 중 변하는 레벨과 쿨타임은 `SkillInstance`에서 관리하고, 슬롯은 해당 인스턴스의 참조를 보관하도록 했습니다. 슬롯 교환 시에는 같은 인스턴스를 이동시키며, 선택 당시의 스킬과 현재 슬롯의 스킬이 다르면 요청을 거절합니다. 같은 런에서 초기화 요청이 반복될 때도 기존 장착 상태를 유지합니다.
+투사체는 발사할 때의 능력치를 기준으로 피해를 계산합니다. 날아가는 도중에 캐릭터가 강화되더라도 이미 발사한 투사체에는 영향을 주지 않습니다.
 
-쿨타임을 시작할 때 지속 시간과 종료 시각을 저장합니다. 강화로 쿨타임이 줄어들어도 이미 시작한 대기 시간은 바꾸지 않고, 줄어든 쿨타임은 다음 사용부터 적용합니다.
+전투 이펙트의 재생과 재사용 기능도 만들었습니다. 사용이 끝난 이펙트는 보관했다가 다음에 다시 꺼내 씁니다.
 
-투사체처럼 발동과 적중 시점이 다른 공격에는 별도의 실행 정보를 사용합니다. `SkillExecutionContext`에 발동 당시의 능력치와 성장값을 보관하고, `SkillDamageResolver`가 이 값을 기준으로 피해를 계산합니다.
+### 성장과 영구 강화
 
-```mermaid
-flowchart LR
-    subgraph Before["교환 전"]
-        Q["Q 슬롯"] --> A["스킬 인스턴스 A<br/>레벨 · 쿨타임 보관"]
-    end
-    subgraph After["교환 후"]
-        E["E 슬롯"] --> B["스킬 인스턴스 A<br/>레벨 · 쿨타임 유지"]
-    end
-    A -.->|동일한 인스턴스| B
-```
+플레이 중 얻은 경험치로 레벨이 오르고, 캐릭터 설정에 따라 능력치가 바뀌는 성장 기능을 맡았습니다. 한 번에 많은 경험치를 얻어 여러 레벨이 오르는 경우에도 각 레벨의 성장 효과를 순서대로 반영합니다. 새 플레이를 시작하면 레벨과 경험치는 다시 초기화됩니다.
 
-<details>
-<summary>TrySwapSlots 코드 보기</summary>
+로비에서는 영구 재화로 강화를 구매하고 캐릭터의 슬롯에 장착할 수 있습니다. 강화 화면에는 현재 구매 단계, 효과와 다음 단계의 비용을 표시합니다. 보유 재화와 최대 단계에 맞춰 구매 버튼을 활성화하고, 구매가 끝나면 강화 단계와 남은 재화 표시를 갱신하도록 구현했습니다.
 
-```csharp
-public bool TrySwapSlots(int first, int second, SkillInstance expectedSource = null)
-{
-    if (!CanEdit || !IsValidSlot(first) || !IsValidSlot(second))
-        return false;
+구매한 강화는 장착·해제하거나 드래그로 슬롯을 교환할 수 있습니다. 구매하지 않은 강화는 장착할 수 없고, 같은 강화를 여러 슬롯에 중복 장착할 수도 없습니다.
 
-    if (expectedSource != null && _slots[first] != expectedSource)
-        return false;
+플레이를 시작할 때 장착한 강화의 구매 단계에 따라 보너스를 계산해 둡니다. 해당 플레이에서는 이 값을 시작 능력치와 레벨업 시 추가되는 능력치에 사용합니다.
 
-    if (first == second)
-        return true;
+### 퀘스트
 
-    SkillInstance temporary = _slots[first];
-    _slots[first] = _slots[second];
-    _slots[second] = temporary;
+일일 퀘스트 목록 구성, 목표별 진행 계산, 완료 판정과 보상 수령을 맡았습니다. 팀원이 개발한 적·맵·상점 기능에서 전달되는 처치·클리어·골드 변화 등의 결과를 받아 퀘스트 진행에 반영했습니다.
 
-    OnChanged?.Invoke();
-    return true;
-}
-```
+로비의 일일 퀘스트 화면에는 목표 설명, 현재 진행도와 목표값, 보상 금액을 표시합니다. 진행 상황에 따라 버튼을 ‘진행 중’, ‘보상 수령’, ‘수령 완료’로 바꾸고, 완료한 미수령 퀘스트만 보상을 받을 수 있게 했습니다. 저장 실패 안내와 재시도 버튼도 이 화면에 구현했습니다.
 
-</details>
+플레이 중 돌발 퀘스트를 생성할 때는 이미 진행 중인 퀘스트를 제외한 목록에서 하나를 무작위로 선택합니다. 완료한 퀘스트의 보상은 로비 복귀 때 지급할 금액으로 모아 둡니다.
 
-**관련 코드:** [SkillLoadout](Assets/_Project/02.Scripts/Skills/SkillLoadout.cs#L139), [SkillInstance](Assets/_Project/02.Scripts/Skills/SkillInstance.cs#L13), [SkillExecutionContext](Assets/_Project/02.Scripts/Skills/SkillExecutionContext.cs#L42), [SkillDamageResolver](Assets/_Project/02.Scripts/Skills/SkillDamageResolver.cs#L12)
+적 처치 수와 획득 골드는 계속 더하고, 보유 골드는 현재 잔액을 사용합니다.
 
-### 2. Quest — 진행과 보상 수령을 구분한 퀘스트 시스템
+월드 지도에서 이동하는 각 지점은 노드라고 부릅니다. 시작점에서 얼마나 먼 지점까지 클리어했는지 기록하는 목표는, 이전보다 더 먼 노드를 클리어했을 때만 갱신합니다.
 
-퀘스트의 조건 평가, 진행·수령 기록, 일일 퀘스트 선택과 보상 요청 처리를 구현했습니다. 팀원이 개발한 적·월드·상점 기능에서 전달되는 결과를 받아 퀘스트 진행에 반영하고, 프로필 저장 흐름과 연결했습니다.
-
-퀘스트는 목표에 따라 진행값을 계산하는 방식이 다릅니다. 적 처치 수와 획득 골드는 누적해야 하지만, 보유 골드는 현재 잔액을 사용해야 하고, 클리어한 노드의 최고 Rank는 이전보다 높은 값만 반영해야 합니다. 이러한 차이를 `Add`, `Set`, `Maximum`으로 나누고, `QuestProgress`가 목표 조건을 확인한 뒤 공통 계산기를 사용하도록 구성했습니다.
-
-런 중 쌓이는 진행과 프로필에 반영할 기록도 별도로 관리합니다. 저장 데이터를 수집할 때는 미정산 진행을 제외한 기록을 사용합니다. 정산 없이 런을 폐기하는 경우에는 보류 중인 돌발 보상과 현재 진행을 정리하고, 기존 기록으로 일일 퀘스트를 재구성합니다. 프로필에 기록을 반영한 상태와 파일·서버에 저장을 완료한 상태는 별도로 구분합니다.
-
-보상 수령에는 완료 여부뿐 아니라 수령 여부와 일일 주기를 함께 확인합니다. `TryPrepareClaim()`은 현재 주기의 완료된 미수령 퀘스트에 대해서만 후보 기록과 보상량을 준비합니다. 이후 `QuestActionService`가 지갑의 후보 잔액까지 검증한 뒤 퀘스트 기록과 잔액을 반영합니다. 반영 도중 예외가 발생하면 추가 퀘스트 작업을 차단합니다.
+일일 퀘스트 보상은 아래 순서로 처리합니다.
 
 ```mermaid
 flowchart TD
-    Request["보상 수령 요청"] --> Check{"일일 주기 · 완료 · 수령 상태 검사"}
-    Check -->|거절| Reject["상태 유지 · 거절 사유 전달"]
-    Check -->|통과| Candidate["수령 후보 기록 · 보상량 준비"]
-    Candidate --> Balance{"후보 잔액 검증"}
-    Balance -->|실패| Reject
-    Balance -->|성공| Apply["퀘스트 기록 · 잔액 반영"]
+    A["보상 수령 요청"] --> B{"현재 일일 퀘스트이며<br/>완료했고 아직 받지 않았는가?"}
+    B -->|아니요| C["거절 사유 안내"]
+    B -->|예| D["보상을 받았을 때의 잔액 계산"]
+    D --> E{"보상을 더해도 최대 보유 금액을 넘지 않는가?"}
+    E -->|아니요| C
+    E -->|예| F["보상 지급 · 수령 완료로 기록"]
 ```
 
-<details>
-<summary>TryPrepareClaim 코드 보기</summary>
+퀘스트 기록이나 보상 잔액을 반영하다 오류가 나면, 이후 보상 수령과 일일 퀘스트 갱신, 플레이 결과 반영을 막습니다. 영구 강화 구매·장착 변경과 새 플레이 시작도 제한합니다.
 
-```csharp
-public bool TryPrepareClaim(
-    string questId,
-    string periodKey,
-    out IReadOnlyList<QuestRecord> records,
-    out long reward,
-    out string message)
-{
-    RequireInitialized();
+### 로비·로그인·프로필 저장
 
-    records = null;
-    reward = 0;
-    message = null;
+캐릭터 선택 화면에서 캐릭터 소개와 시작 스킬을 확인하고, 공격력·체력 등 기본 능력치를 비교할 수 있도록 했습니다. 선택한 캐릭터의 숙련도 레벨과 경험치도 표시합니다. 캐릭터 선택, 능력치·재화 표시와 프로필 UI를 맡고, 로비의 화면 전환과 다른 기능의 연결은 팀원과 함께 작업했습니다.
 
-    if (periodKey != _dailyPeriod)
-    {
-        message = "일일 퀘스트 주기가 변경되었습니다.";
-        return false;
-    }
+Google 로그인과 Firebase 인증을 연결하고, 인증한 계정의 프로필을 불러온 뒤 로비로 진입하도록 했습니다. 로그인 화면에는 인증과 데이터 준비 상태를 표시하며, 취소되거나 실패한 경우에는 안내 문구를 보여줍니다.
 
-    List<QuestRecord> candidate = BuildProgressRecords();
+프로필에는 영구 재화, 강화 구매 내역, 장착 구성, 숙련도와 일일 퀘스트 기록을 저장합니다. 다음 접속 때 저장된 내용을 복원해 로비 화면에서 이어서 사용할 수 있도록 했습니다.
 
-    int index = candidate.FindIndex(item =>
-        item.Kind == QuestKind.Daily &&
-        item.QuestId == questId &&
-        item.PeriodKey == periodKey);
+로컬 JSON 파일과 Firestore 서버 저장을 지원합니다. 게임 기능에서는 저장 위치가 로컬 파일인지 서버인지 구분하지 않고 저장을 요청합니다. 로컬 저장은 임시 파일에 먼저 기록한 뒤 기존 파일을 교체하고 백업을 남깁니다.
 
-    if (index < 0)
-    {
-        message = "수령할 퀘스트 기록이 없습니다.";
-        return false;
-    }
+저장을 다시 시도할 때 보상 지급이나 성장 처리가 반복되지 않도록, 처음 저장하려던 데이터를 그대로 사용합니다.
 
-    QuestRecord record = candidate[index];
-
-    if (!record.IsCompleted || record.IsClaimed)
-    {
-        message = "완료된 미수령 퀘스트만 수령할 수 있습니다.";
-        return false;
-    }
-
-    QuestDefinition definition =
-        _definitionCatalog.GetDefinition(questId);
-
-    candidate[index] = record.CreateClaimedRecord();
-
-    records = candidate;
-    reward = definition.MetaGoldReward;
-    return true;
-}
-```
-
-</details>
-
-**관련 코드:** [QuestManager](Assets/_Project/02.Scripts/Quest/QuestManager.cs#L510), [ObjectiveEvaluator](Assets/_Project/02.Scripts/Quest/ObjectiveEvaluator.cs#L28), [QuestProgress](Assets/_Project/02.Scripts/Quest/QuestProgress.cs#L80), [QuestRecord](Assets/_Project/02.Scripts/Quest/QuestRecord.cs#L65), [QuestActionService](Assets/_Project/02.Scripts/Quest/QuestActionService.cs#L145)
-
-### 3. Save — 실패한 데이터를 그대로 재시도하는 프로필 저장
-
-영구 데이터의 저장 형식, 저장 요청 조정, 실패 재시도와 로컬·Firestore 저장소 구현을 맡았습니다. 런 점수와 결산 보상 계산은 팀원이 담당했습니다.
-
-저장에 실패했을 때는 게임 내 보상이나 성장 결과가 이미 반영되어 있을 수 있습니다. 따라서 재시도 과정에서 게임 규칙을 다시 실행하지 않도록, 변경된 항목을 `MetaSaveChanges`에 저장용 복사본으로 구성하고 대기 데이터로 보관했습니다.
-
-`MetaProfileSaveCoordinator`는 저장이 성공한 경우에만 해당 변경 표시와 대기 데이터를 정리합니다. 실패하거나 예외가 발생하면 데이터를 보관하고 오류를 전달합니다. `RetryAsync()`는 보관한 데이터로 저장을 다시 시도합니다. 저장 중이거나 실패한 작업이 남아 있는 동안에는 관련 기능의 추가 변경을 제한합니다.
-
-로컬 저장에서는 임시 파일에 새 내용을 기록한 뒤 본파일을 교체하고 백업을 남기도록 했습니다. 파일 기록이 성공한 후에만 메모리에 보관한 기준 저장본을 갱신합니다. 로컬 저장소와 Firestore 저장소는 모두 `IMetaProfileStore`를 구현합니다. 호출하는 쪽에서는 저장 위치와 관계없이 같은 메서드로 저장을 요청합니다.
+저장을 마칠 때까지 영구 강화 구매와 장착 변경, 일일 퀘스트 보상 수령, 새 플레이 시작은 할 수 없습니다.
 
 ```mermaid
 flowchart TD
-    Changes["변경 항목 수집"] --> Pending["고정된 저장 후보 보관"]
-    Pending --> Write["기록 시도"]
-    Write --> Result{"저장 성공?"}
-    Result -->|성공| Clear["변경 표시 · 저장 후보 정리"]
-    Result -->|실패 또는 예외| Keep["저장 후보 유지 · 오류 전달"]
-    Keep -->|동일한 후보로 재시도| Write
+    A["저장할 데이터 보관"] --> B["저장 시도"]
+    B --> C{"성공했는가?"}
+    C -->|예| D["저장 완료 · 보관한 데이터 정리"]
+    C -->|아니요| E["데이터 유지 · 오류 안내"]
+    E -->|재시도| B
 ```
 
-<details>
-<summary>WritePendingAsync 코드 보기</summary>
+### 개발 도구
 
-```csharp
-async Task<bool> WritePendingAsync()
-{
-    _writing = true;
-    ErrorMessage = null;
-    PublishChanged();
+에디터에서 선택한 CSV를 JSON 파일로 변환하는 메뉴와 스킬·퀘스트 데이터 편집 도구를 만들었습니다. 퀘스트는 목표 유형에 필요한 설정을 보여주고, 스킬은 유형별 설정과 식별자를 검사할 수 있도록 했습니다.
 
-    bool saved = false;
+외부 마법 이펙트를 프로젝트에서 재생할 프리팹으로 변환하는 도구도 작성했습니다. 변환 결과에 필요한 구성 요소가 연결되어 있는지, 재생 시간값이 올바른지 검사하고 대표 이펙트의 재생 결과를 확인할 수 있습니다.
 
-    try
-    {
-        saved = await _writeAsync(_pending);
+스킬 이펙트와 투사체를 확인하는 미리보기 도구에서는 효과의 재생 모습을 살펴보거나 투사체의 속도와 최대 재생 시간을 바꿔 시험할 수 있습니다. 투사체는 단발·반복 발사와 경로 표시를 지원합니다.
 
-        if (saved)
-        {
-            _dirty &= ~_pending.Parts;
-            _pending = null;
-        }
-        else
-        {
-            ErrorMessage = "변경 내용을 저장하지 못했습니다.";
-        }
-    }
-    catch (Exception exception)
-    {
-        ErrorMessage = exception.Message;
+로비를 초기화하고 다시 불러오는 테스트 기능을 구현했습니다.
 
-        if (!_disposed)
-            Debug.LogException(exception);
-    }
-    finally
-    {
-        _writing = false;
-        PublishChanged();
-    }
+외부 모델·애니메이션·VFX를 게임에 적용했으며, 원본 에셋 제작은 담당하지 않았습니다.
 
-    return saved && !_disposed;
-}
-```
+## 팀 기능 통합
 
-</details>
+팀장으로 PR 병합과 기능 통합을 담당했습니다. 적 처치 결과를 경험치와 퀘스트에 전달하고, 상점의 구매·강화 결과를 재화와 스킬바에 표시하는 부분은 팀원과 함께 작업했습니다.
 
-**관련 코드:** [MetaProfileSaveCoordinator](Assets/_Project/02.Scripts/GameFlow/Save/MetaProfileSaveCoordinator.cs#L108), [MetaSaveChanges](Assets/_Project/02.Scripts/Persistence/MetaSaveChanges.cs#L60), [IMetaProfileStore](Assets/_Project/02.Scripts/Persistence/IMetaProfileStore.cs#L6), [LocalMetaProfileStore](Assets/_Project/02.Scripts/Persistence/LocalMetaProfileStore.cs#L287), [FirestoreMetaProfileStore](Assets/_Project/02.Scripts/Persistence/FirestoreMetaProfileStore.cs#L94)
+씬 전환과 새 플레이 준비에서는 여러 기능의 초기화 순서를 함께 맞췄습니다. 골드를 초기화하고, 적의 공격 대상을 플레이어로 지정한 뒤 상점·맵·UI를 연결했습니다. 시작 맵에 플레이어를 배치한 뒤 경험치·골드 보상을 받을 수 있도록 준비하고, HUD를 표시한 다음 플레이를 시작하도록 했습니다.
 
-## Appendix — 기타 개인 기여
+맵을 이동할 때는 플레이어 조작을 잠시 막고, 목적지에 배치한 뒤 다시 조작할 수 있게 하는 부분도 공동으로 구현했습니다.
 
-| 영역 | 본인이 맡은 작업 | 대표 코드 |
-| --- | --- | --- |
-| 플레이어 조작 | 입력·이동·애니메이션 구현. 월드 배치와 세션 연결은 공동 작업 | [PlayerMovement](Assets/_Project/02.Scripts/Player/PlayerMovement.cs) |
-| 성장·영구 강화 | 런 레벨 성장, 캐릭터 성장 계산, 영구 강화와 메타 재화 처리 | [MetaProgression](Assets/_Project/02.Scripts/Progression/MetaProgression.cs) |
-| 로비·플레이어 UI | 캐릭터 선택, 영구 강화, 능력치·재화 표시, 플레이어 체력·프로필 HUD | [LobbyCharacterSelectPresenter](Assets/_Project/02.Scripts/UI/Lobby/LobbyCharacterSelect/LobbyCharacterSelectPresenter.cs) |
-| 인증 | Firebase 초기화·인증, Google 로그인과 로그인 UI 연동 | [FirebaseAuthService](Assets/_Project/02.Scripts/Firebase/Authentication/FirebaseAuthService.cs) |
-| 전투 연출 도구 | 전투 이펙트 재생·풀링, 스펠 변환·미리보기·검증, 투사체 미리보기 | [FantasySpellBaker](Assets/_Project/02.Scripts/Presentation/FantasySpells/Editor/FantasySpellBaker.cs) |
-| 데이터·에디터 도구 | CSV 변환, 퀘스트·스킬 데이터 편집·검증, 맵 테스트 씬 도구 | [CsvToJsonConverter](Assets/_Project/02.Scripts/Common/Data/CsvToJsonConverter.cs) |
-| 게임 흐름·팀 통합 | 게임 흐름·씬 전환 기반 구현, PR 병합, 세션·UI·퀘스트·상점 연결 및 공동 수정 | [GameFlowController](Assets/_Project/02.Scripts/GameFlow/GameFlowController.cs) |
-
-외부 리소스를 게임에 적용하기 위한 재생 코드와 변환·검증 도구를 작성했습니다. 모델·애니메이션·VFX 등 외부 에셋의 원작 제작과 구분합니다.
-
-## Tech Stack
+## 사용 기술
 
 | 기술 | 사용 목적 |
 | --- | --- |
-| Unity 6 / C# | 플레이어 조작, 전투·스킬, 성장, 퀘스트와 UI 구현 |
-| Universal Render Pipeline | 게임의 3D 렌더링 |
-| ScriptableObject | 스킬·캐릭터·퀘스트의 설정 데이터 |
-| Unity UI / TextMeshPro | 로비, 플레이어 HUD, 스킬바와 퀘스트 화면 |
-| Firebase Authentication / Firestore | 사용자 인증과 계정 프로필 저장 |
-| Newtonsoft Json / 로컬 JSON | 프로필 데이터 변환과 로컬 파일 저장 |
-| C# event / Task | 상태 변경 통지와 비동기 저장 흐름 |
-| Unity Editor Extension | 데이터 편집·검증과 스킬·투사체 미리보기 도구 |
+| Unity 6 / C# | 게임 기능 개발 |
+| Universal Render Pipeline | 3D 렌더링 |
+| ScriptableObject | 스킬·캐릭터·퀘스트 설정 |
+| Unity UI / TextMeshPro | 게임 화면과 텍스트 표시 |
+| Firebase Authentication / Firestore | 로그인과 계정 데이터 저장 |
+| Newtonsoft Json / 로컬 JSON | 저장 데이터 변환과 파일 저장 |
+| C# event / Task | 변경 알림과 비동기 저장 |
+| Unity Editor Extension | 데이터 편집과 스킬·투사체 미리보기 |
 
-## Repository Scope
+## 저장소와 확인 범위
 
-이 저장소에는 프로젝트 스크립트와 개인 기여를 정리한 README가 들어 있습니다. 게임 실행에 필요한 씬·리소스·패키지 설정은 포함되어 있지 않습니다.
+이 저장소에는 프로젝트 스크립트와 README가 들어 있습니다. 씬·리소스·패키지 설정은 포함하지 않아 이 저장소만으로 게임을 실행할 수는 없습니다.
 
-## Verification Scope
-
-아래는 본문 사례를 정리할 때 확인한 범위입니다.
-
-| 구분 | 확인 범위 |
-| --- | --- |
-| 소스 확인 | 관련 소스의 처리 흐름 확인 및 대표 코드 발췌문과 원본 대조 |
-| 개인 기여 확인 | Git 작성·수정 이력을 바탕으로 본인 구현과 공동 작업 범위 구분 |
-| 실행 검증 | 미실시 — 빌드·플레이·장애 재현 테스트 결과는 추후 추가 |
-
-본문은 소스 코드에서 확인한 구현을 설명합니다. 실제 실행 결과와 성능 측정값은 검증 후 추가합니다.
+기능 설명은 소스 코드를 바탕으로 정리했습니다. 이번 확인에서는 실행 테스트와 성능 측정을 진행하지 않았습니다.
 
 ## Contact
 
