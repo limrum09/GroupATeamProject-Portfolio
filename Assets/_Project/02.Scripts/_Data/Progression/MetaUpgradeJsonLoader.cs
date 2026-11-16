@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -8,7 +8,7 @@ using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 /// <summary>
-/// ¼¼ JSON Ç¥¸¦ ¿¬°áÇÏ¿© ¸ŞÅ¸ °­È­ Á¤ÀÇ ±¸¼º
+/// ì„¸ JSON í‘œë¥¼ ì—°ê²°í•˜ì—¬ ë©”íƒ€ ê°•í™” ì •ì˜ êµ¬ì„±
 /// </summary>
 public static class MetaUpgradeJsonLoader
 {
@@ -28,17 +28,17 @@ public static class MetaUpgradeJsonLoader
 
                 JObject document = JObject.Load(reader, settings);
 
-                // ¿À·ù¿¡ Ç¥½ÃÇÒ ¿øº» JSON ÀÌ¸§
+                // ì˜¤ë¥˜ì— í‘œì‹œí•  ì›ë³¸ JSON ì´ë¦„
                 document.AddAnnotation(asset.name);
 
                 if (reader.Read())
-                    throw Error(document, "JSON ·çÆ® µÚ¿¡ Ãß°¡ ³»¿ë Á¸Àç");
+                    throw Error(document, "JSON ë£¨íŠ¸ ë’¤ì— ì¶”ê°€ ë‚´ìš© ì¡´ì¬");
 
                 if (!(document["Rows"] is JArray rows))
-                    throw Error(document, "Rows ¹è¿­ ÇÊ¿ä");
+                    throw Error(document, "Rows ë°°ì—´ í•„ìš”");
 
                 if (rows.Count == 0)
-                    throw Error(document, "Rows ¹è¿­¿¡ µ¥ÀÌÅÍ ÇÊ¿ä");
+                    throw Error(document, "Rows ë°°ì—´ì— ë°ì´í„° í•„ìš”");
 
                 return rows;
             }
@@ -52,7 +52,7 @@ public static class MetaUpgradeJsonLoader
     static JObject ReadObject(JToken token)
     {
         if (!(token is JObject row))
-            throw Error(token, "ÇàÀº JSON °´Ã¼ ÇüÅÂ ÇÊ¿ä");
+            throw Error(token, "í–‰ì€ JSON ê°ì²´ í˜•íƒœ í•„ìš”");
 
         return row;
     }
@@ -60,12 +60,12 @@ public static class MetaUpgradeJsonLoader
     static string ReadText(JObject row, string field, bool allowEmpty = false)
     {
         if (!row.TryGetValue(field, StringComparison.Ordinal, out JToken token) || token.Type != JTokenType.String)
-            throw Error(row, $"{field}: ¹®ÀÚ¿­ ÇÊµå ÇÊ¿ä");
+            throw Error(row, $"{field}: ë¬¸ìì—´ í•„ë“œ í•„ìš”");
 
         string value = (string)token;
 
         if (value == null || (!allowEmpty && string.IsNullOrWhiteSpace(value)))
-            throw Error(row, $"{field}: °ª ´©¶ô");
+            throw Error(row, $"{field}: ê°’ ëˆ„ë½");
 
         return value;
     }
@@ -77,7 +77,7 @@ public static class MetaUpgradeJsonLoader
         foreach (char character in value)
         {
             if (char.IsWhiteSpace(character) || char.IsControl(character))
-                throw Error(row, $"{field}: ID¿¡ °ø¹é ¶Ç´Â Á¦¾î ¹®ÀÚ »ç¿ë ºÒ°¡");
+                throw Error(row, $"{field}: IDì— ê³µë°± ë˜ëŠ” ì œì–´ ë¬¸ì ì‚¬ìš© ë¶ˆê°€");
         }
 
         return value;
@@ -86,7 +86,7 @@ public static class MetaUpgradeJsonLoader
     static long ReadLong(JObject row, string field)
     {
         if (!long.TryParse(ReadText(row, field), NumberStyles.Integer, CultureInfo.InvariantCulture, out long value))
-            throw Error(row, $"{field}: 64ºñÆ® Á¤¼ö ÇÊ¿ä");
+            throw Error(row, $"{field}: 64ë¹„íŠ¸ ì •ìˆ˜ í•„ìš”");
 
         return value;
     }
@@ -96,7 +96,7 @@ public static class MetaUpgradeJsonLoader
         long value = ReadLong(row, field);
 
         if (value < minimum || value > int.MaxValue)
-            throw Error(row, $"{field}: {minimum} ÀÌ»ó 32ºñÆ® Á¤¼ö ÇÊ¿ä");
+            throw Error(row, $"{field}: {minimum} ì´ìƒ 32ë¹„íŠ¸ ì •ìˆ˜ í•„ìš”");
 
         return (int)value;
     }
@@ -104,12 +104,12 @@ public static class MetaUpgradeJsonLoader
     static float ReadFloat(JObject row, string field)
     {
         if (!double.TryParse(ReadText(row, field), NumberStyles.Float, CultureInfo.InvariantCulture, out double number) || double.IsNaN(number) || double.IsInfinity(number))
-            throw Error(row, $"{field}: À¯ÇÑÇÑ ¼ıÀÚ ÇÊ¿ä");
+            throw Error(row, $"{field}: ìœ í•œí•œ ìˆ«ì í•„ìš”");
 
         float value = (float)number;
 
         if (float.IsNaN(value) || float.IsInfinity(value) || (number != 0d && value == 0f))
-            throw Error(row, $"{field}: float·Î Ç¥Çö °¡´ÉÇÑ °ª ÇÊ¿ä");
+            throw Error(row, $"{field}: floatë¡œ í‘œí˜„ ê°€ëŠ¥í•œ ê°’ í•„ìš”");
 
         return value;
     }
@@ -117,7 +117,7 @@ public static class MetaUpgradeJsonLoader
     static bool ReadBoolean(JObject row, string field)
     {
         if (!bool.TryParse(ReadText(row, field), out bool value))
-            throw Error(row, $"{field}: TRUE ¶Ç´Â FALSE ÇÊ¿ä");
+            throw Error(row, $"{field}: TRUE ë˜ëŠ” FALSE í•„ìš”");
 
         return value;
     }
@@ -130,12 +130,12 @@ public static class MetaUpgradeJsonLoader
     }
 
     /// <summary>
-    /// °­È­ ¸ñ·Ï°ú ±¸¸Å ´Ü°è ¹× È¿°ú JSON ÀĞ±â
+    /// ê°•í™” ëª©ë¡ê³¼ êµ¬ë§¤ ë‹¨ê³„ ë° íš¨ê³¼ JSON ì½ê¸°
     /// </summary>
-    /// <param name="upgradesJson">°­È­ ¸ñ·Ï JSON</param>
-    /// <param name="ranksJson">±¸¸Å ´Ü°è JSON</param>
-    /// <param name="effectsJson">È¿°ú JSON</param>
-    /// <returns>°­È­ ID·Î Á¶È¸ÇÏ´Â ÀĞ±â Àü¿ë µ¥ÀÌÅÍ</returns>
+    /// <param name="upgradesJson">ê°•í™” ëª©ë¡ JSON</param>
+    /// <param name="ranksJson">êµ¬ë§¤ ë‹¨ê³„ JSON</param>
+    /// <param name="effectsJson">íš¨ê³¼ JSON</param>
+    /// <returns>ê°•í™” IDë¡œ ì¡°íšŒí•˜ëŠ” ì½ê¸° ì „ìš© ë°ì´í„°</returns>
     public static IReadOnlyDictionary<string, MetaUpgradeData> Load(TextAsset upgradesJson, TextAsset ranksJson, TextAsset effectsJson)
     {
         if (upgradesJson == null)
@@ -155,19 +155,24 @@ public static class MetaUpgradeJsonLoader
 
         Dictionary<(string UpgradeId, int Rank), List<MetaUpgradeEffectData>> effectsByRank = new Dictionary<(string UpgradeId, int Rank), List<MetaUpgradeEffectData>>();
 
-        // °­È­ ID µî·Ï
+        // ê°•í™” IDì™€ í†µí•© ë ˆë²¨ ì—´ ì‚¬ìš© ì—¬ë¶€ í™•ì¸
+        bool hasIntegratedLevelColumn = false;
+
         foreach (JToken token in upgradeRows)
         {
             JObject row = ReadObject(token);
             string upgradeId = ReadId(row, "UpgradeId");
 
             if (ranksByUpgrade.ContainsKey(upgradeId))
-                throw Error(row, $"Áßº¹ °­È­ ID: {upgradeId}");
+                throw Error(row, $"ì¤‘ë³µ ê°•í™” ID: {upgradeId}");
+
+            if (row.Property("RequiredIntegratedLevel") != null)
+                hasIntegratedLevelColumn = true;
 
             ranksByUpgrade.Add(upgradeId, new SortedDictionary<int, JObject>());
         }
 
-        // °­È­ ID¸¦ ±âÁØÀ¸·Î ±¸¸Å ´Ü°è ¿¬°á
+        // ê°•í™” IDë¥¼ ê¸°ì¤€ìœ¼ë¡œ êµ¬ë§¤ ë‹¨ê³„ ì—°ê²°
         foreach (JToken token in rankRows)
         {
             JObject row = ReadObject(token);
@@ -175,17 +180,17 @@ public static class MetaUpgradeJsonLoader
             int rank = ReadInt(row, "Rank", 1);
 
             if (!ranksByUpgrade.TryGetValue(upgradeId, out SortedDictionary<int, JObject> ranks))
-                throw Error(row, $"Á¸ÀçÇÏÁö ¾Ê´Â °­È­ ID: {upgradeId}");
+                throw Error(row, $"ì¡´ì¬í•˜ì§€ ì•ŠëŠ” ê°•í™” ID: {upgradeId}");
 
             if (ranks.ContainsKey(rank))
-                throw Error(row, $"Áßº¹ ±¸¸Å ´Ü°è: {upgradeId}/{rank}");
+                throw Error(row, $"ì¤‘ë³µ êµ¬ë§¤ ë‹¨ê³„: {upgradeId}/{rank}");
 
             ranks.Add(rank, row);
 
             effectsByRank.Add((upgradeId, rank), new List<MetaUpgradeEffectData>());
         }
 
-        // °­È­ ID¿Í ±¸¸Å ´Ü°è¸¦ ±âÁØÀ¸·Î È¿°ú ¿¬°á
+        // ê°•í™” IDì™€ êµ¬ë§¤ ë‹¨ê³„ë¥¼ ê¸°ì¤€ìœ¼ë¡œ íš¨ê³¼ ì—°ê²°
         foreach (JToken token in effectRows)
         {
             JObject row = ReadObject(token);
@@ -193,7 +198,7 @@ public static class MetaUpgradeJsonLoader
             int rank = ReadInt(row, "Rank", 1);
 
             if (!effectsByRank.TryGetValue((upgradeId, rank), out List<MetaUpgradeEffectData> effects))
-                throw Error(row, $"Á¸ÀçÇÏÁö ¾Ê´Â ±¸¸Å ´Ü°è ÂüÁ¶: {upgradeId}/{rank}");
+                throw Error(row, $"ì¡´ì¬í•˜ì§€ ì•ŠëŠ” êµ¬ë§¤ ë‹¨ê³„ ì°¸ì¡°: {upgradeId}/{rank}");
 
             string statId = ReadId(row, "StatId");
             string applyTiming = ReadId(row, "ApplyTiming");
@@ -203,14 +208,14 @@ public static class MetaUpgradeJsonLoader
             bool duplicated = effects.Exists(effect => effect.StatId == statId && effect.ApplyTiming == applyTiming && effect.ModifierType == modifierType);
 
             if (duplicated)
-                throw Error(row, $"Áßº¹ È¿°ú: {upgradeId}/{rank}/" + $"{statId}/{applyTiming}/{modifierType}");
+                throw Error(row, $"ì¤‘ë³µ íš¨ê³¼: {upgradeId}/{rank}/" + $"{statId}/{applyTiming}/{modifierType}");
 
             effects.Add(new MetaUpgradeEffectData(statId, applyTiming, modifierType, value));
         }
 
         Dictionary<string, MetaUpgradeData> result = new Dictionary<string, MetaUpgradeData>(StringComparer.Ordinal);
 
-        // ¿¬°áµÈ Ç¥¿¡¼­ ÃÖÁ¾ ÀĞ±â Àü¿ë µ¥ÀÌÅÍ ±¸¼º
+        // ì—°ê²°ëœ í‘œì—ì„œ ìµœì¢… ì½ê¸° ì „ìš© ë°ì´í„° êµ¬ì„±
         foreach (JToken token in upgradeRows)
         {
             JObject row = ReadObject(token);
@@ -220,7 +225,7 @@ public static class MetaUpgradeJsonLoader
             SortedDictionary<int, JObject> sourceRanks = ranksByUpgrade[upgradeId];
 
             if (sourceRanks.Count != maxRank)
-                throw Error(row, $"{upgradeId}: MaxRank¿Í ±¸¸Å ´Ü°è ¼ö ºÒÀÏÄ¡ " + $"(MaxRank={maxRank}, ´Ü°è ¼ö={sourceRanks.Count})");
+                throw Error(row, $"{upgradeId}: MaxRankì™€ êµ¬ë§¤ ë‹¨ê³„ ìˆ˜ ë¶ˆì¼ì¹˜ " + $"(MaxRank={maxRank}, ë‹¨ê³„ ìˆ˜={sourceRanks.Count})");
 
             List<MetaUpgradeRankData> ranks = new List<MetaUpgradeRankData>();
 
@@ -229,22 +234,25 @@ public static class MetaUpgradeJsonLoader
                 int expectedRank = ranks.Count + 1;
 
                 if (entry.Key != expectedRank)
-                    throw Error(entry.Value, $"{upgradeId}: {expectedRank}´Ü°è ´©¶ô");
+                    throw Error(entry.Value, $"{upgradeId}: {expectedRank}ë‹¨ê³„ ëˆ„ë½");
 
                 List<MetaUpgradeEffectData> effects = effectsByRank[(upgradeId, entry.Key)];
 
                 if (effects.Count == 0)
-                    throw Error(entry.Value, $"{upgradeId}/{entry.Key}: È¿°ú ¾øÀ½");
+                    throw Error(entry.Value, $"{upgradeId}/{entry.Key}: íš¨ê³¼ ì—†ìŒ");
 
                 long cost = ReadLong(entry.Value, "Cost");
 
                 if (cost < 0)
-                    throw Error(entry.Value, "Cost´Â 0 ÀÌ»ó ÇÊ¿ä");
+                    throw Error(entry.Value, "CostëŠ” 0 ì´ìƒ í•„ìš”");
 
                 ranks.Add(new MetaUpgradeRankData(entry.Key, cost, effects));
             }
 
-            MetaUpgradeData upgrade = new MetaUpgradeData(upgradeId, ReadText(row, "DisplayName"), ReadText(row, "Description"), ReadText(row, "IconId", true), ReadId(row, "Category"), ReadId(row, "TargetCharacterId"), ReadInt(row, "SortOrder", 0), ReadBoolean(row, "Enabled"), ranks);
+            int requiredIntegratedLevel = hasIntegratedLevelColumn ? ReadInt(row, "RequiredIntegratedLevel", 1) : 1;
+
+            MetaUpgradeData upgrade = new MetaUpgradeData(upgradeId, ReadText(row, "DisplayName"), ReadText(row, "Description"), requiredIntegratedLevel, ReadId(row, "Category"), 
+                ReadId(row, "TargetCharacterId"), ReadInt(row, "SortOrder", 0), ReadBoolean(row, "Enabled"), ranks);
 
             result.Add(upgradeId, upgrade);
         }

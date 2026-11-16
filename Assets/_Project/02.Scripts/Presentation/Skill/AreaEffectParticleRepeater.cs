@@ -74,34 +74,24 @@ public class AreaEffectParticleRepeater : MonoBehaviour
 
     IEnumerator RepeatAfterCompletion(AreaEffectDefinition definition)
     {
-        // 기존 재생기가 실행한 최초 재생을 첫 회차로 계산
+        // CombatEffect에서 이미 재생한 첫 회차
         int playbackCount = 1;
-        double endsAt = Time.timeAsDouble + definition.Duration;
-
-        WaitForSeconds delay = new WaitForSeconds(definition.PulseInterval);
-
-        // 최초 Play 호출 직후의 중복 재생 방지
-        yield return null;
+        double startedAt = Time.timeAsDouble;
+        double endsAt = startedAt + definition.Duration;
+        double nextPlayAt = startedAt + definition.PulseInterval;
 
         while (CanRepeat(definition, playbackCount, endsAt))
         {
-            if (Time.timeScale <= 0f || _root.IsAlive(true))
+            double now = Time.timeAsDouble;
+
+            if (Time.timeScale > 0f && now >= nextPlayAt)
             {
-                yield return null;
-                continue;
+                _root.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                _root.Play(true);
+
+                playbackCount++;
+                nextPlayAt = now + definition.PulseInterval;
             }
-
-            // 자식 파티클까지 모두 종료된 뒤 다음 재생 대기
-            yield return delay;
-
-            // 대기 중 지속시간 또는 횟수 조건이 끝난 경우 제외
-            if (!CanRepeat(definition, playbackCount, endsAt))
-                break;
-
-            _root.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
-            _root.Play(true);
-            playbackCount++;
 
             yield return null;
         }

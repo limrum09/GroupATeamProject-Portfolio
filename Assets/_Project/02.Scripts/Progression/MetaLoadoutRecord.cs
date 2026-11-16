@@ -15,7 +15,8 @@ public enum MetaEquipStatus
     Busy,
     NotAllowed,
     Applied,
-    Failed
+    Failed,
+    SlotLocked
 }
 
 /// <summary>

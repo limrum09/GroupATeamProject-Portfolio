@@ -14,10 +14,16 @@ public class MetaUpgradeSlotView : MonoBehaviour, IPointerDownHandler, IPointerC
     [SerializeField] Image _icon;
     [SerializeField] SkillSlotDragInput _dragInput;
 
+    [Header("----- 왼쪽 장착 슬롯 전용 -----")]
+    [SerializeField] MetaLoadoutSlotVisual _loadoutVisual;
+    [SerializeField] SkillIconHover _loadoutHover;
+
     [Header("----- 오른쪽 목록 표시, 왼쪽에서는 생략 가능 -----")]
     [SerializeField] TextMeshProUGUI _rankText;
     [SerializeField] GameObject _equippedText;
     [SerializeField] GameObject _selectionFrame;
+    [SerializeField] GameObject _catalogLock;
+    [SerializeField] TextMeshProUGUI _catalogUnlockLevel;
 
     bool _inputEnabled;
     bool _ignoreClick;
@@ -26,8 +32,7 @@ public class MetaUpgradeSlotView : MonoBehaviour, IPointerDownHandler, IPointerC
     public event Action<MetaUpgradeSlotView, bool> Clicked;
 
     public SkillSlotDragInput DragInput => _dragInput;
-    public Sprite Icon => _icon.sprite;
-
+    public SkillIconHover LoadoutHover => _loadoutHover;
     void OnEnable()
     {
         _dragInput.OnDragStarted += HandleDragStarted;
@@ -40,6 +45,12 @@ public class MetaUpgradeSlotView : MonoBehaviour, IPointerDownHandler, IPointerC
 
         _ignoreClick = false;
         _clickPrimed = false;
+    }
+
+    void SetIcon(Sprite icon)
+    {
+        _icon.sprite = icon;
+        _icon.enabled = icon != null;
     }
 
     void HandleDragStarted(SkillSlotDragInput source, PointerEventData eventData)
@@ -75,26 +86,37 @@ public class MetaUpgradeSlotView : MonoBehaviour, IPointerDownHandler, IPointerC
     }
 
     /// <summary>
-    /// 아이콘과 구매 단계 및 선택 상태 표시
+    /// 오른쪽 강화 항목의 아이콘, 구매 단계, 선택 및 잠금 표시
     /// </summary>
-    /// <param name="icon">표시할 아이콘, 빈 슬롯은 null</param>
+    /// <param name="icon">표시할 상태별 아이콘, 초기화 시 null</param>
     /// <param name="rank">구매 단계 문자열</param>
     /// <param name="equipped">장착 표시 여부</param>
     /// <param name="selected">선택 테두리 표시 여부</param>
-    public void Show(Sprite icon, string rank, bool equipped, bool selected)
+    /// <param name="lockedUntilLevel">잠긴 항목의 요구 통합 레벨, 해금 시 0</param>
+    public void Show(Sprite icon, string rank, bool equipped, bool selected, int lockedUntilLevel)
     {
-        _icon.sprite = icon;
-        _icon.enabled = icon != null;
+        bool locked = lockedUntilLevel > 0;
 
-        // 왼쪽 슬롯에서 생략 가능한 표시 요소
-        if (_rankText != null)
-            _rankText.text = rank;
+        SetIcon(icon);
+        _rankText.text = rank;
+        _equippedText.SetActive(equipped && !locked);
+        _selectionFrame.SetActive(selected);
+        _catalogLock.SetActive(locked);
 
-        if (_equippedText != null)
-            _equippedText.SetActive(equipped);
+        if (locked)
+            _catalogUnlockLevel.SetText("{0}", lockedUntilLevel);
+    }
 
-        if (_selectionFrame != null)
-            _selectionFrame.SetActive(selected);
+    /// <summary>
+    /// 왼쪽 슬롯의 강화 아이콘과 상태별 프레임 표시
+    /// </summary>
+    /// <param name="visibleIcon">표시할 강화 아이콘, 빈칸 또는 임시 숨김은 null</param>
+    /// <param name="unlocked">슬롯 해금 여부</param>
+    /// <param name="hasUpgrade">슬롯에 실제 강화 값이 있는지 여부</param>
+    public void ShowLoadout(Sprite visibleIcon, bool unlocked, bool hasUpgrade)
+    {
+        SetIcon(unlocked ? visibleIcon : null);
+        _loadoutVisual.Show(unlocked, hasUpgrade);
     }
 
     /// <summary>
@@ -119,8 +141,8 @@ public class MetaUpgradeSlotView : MonoBehaviour, IPointerDownHandler, IPointerC
         if (_dragInput.gameObject != gameObject || !_dragInput.enabled)
             throw new InvalidOperationException($"{name}: 같은 오브젝트의 활성 SkillSlotDragInput 연결 필요");
 
-        if (catalog && (_rankText == null || _equippedText == null || _selectionFrame == null || _icon.sprite == null))
-            throw new MissingReferenceException($"{name}: 오른쪽 항목의 단계 글자, 장착 표시, 선택 테두리, Sprite 연결 필요");
+        if (catalog && (_rankText == null || _equippedText == null || _selectionFrame == null || _catalogLock == null || _catalogUnlockLevel == null))
+            throw new MissingReferenceException($"{name}: 오른쪽 강화 표시와 잠금 UI 연결 필요");
     }
 #endif
 }

@@ -21,6 +21,7 @@ public class SettingsView : MonoBehaviour, ILobbyView
     [SerializeField] Slider _ambientVolumeSlider;
     [SerializeField] Button _applyButton;
     [SerializeField] Button _backButton;
+    [SerializeField] Button _cancelButton;
     [SerializeField] TMP_Text _statusText;
 
     [SerializeField] Button[] _keyButtons;
@@ -28,6 +29,8 @@ public class SettingsView : MonoBehaviour, ILobbyView
     [SerializeField] TMP_Text[] _keyDescriptions;
     [SerializeField] GameObject[] _tabContents;
     [SerializeField] Button[] _tabs;
+    [Header("----- 카테고리 텍스트 -----")]
+    [SerializeField] TMP_Text[] _tabLabels;
     [SerializeField] Button _resetButton;
     [SerializeField] RectTransform _bindingPopup;
     [SerializeField] TMP_Text _candidateLabel;
@@ -47,6 +50,12 @@ public class SettingsView : MonoBehaviour, ILobbyView
     [SerializeField] Image _cursorColorPreview;
     [SerializeField] TMP_Dropdown _combatTextOption;
     [SerializeField] TMP_Dropdown[] _graphicsOptions;
+
+    [Header("----- 드롭다운 화살표 -----")]
+    [SerializeField] Image _combatTextArrow;
+    [SerializeField] Image[] _graphicsArrows;
+    [SerializeField] Sprite _closedDropdownArrow;
+    [SerializeField] Sprite _openDropdownArrow;
 
     UnityAction<int>[] _graphicsHandlers;
     List<Vector2Int> _graphicsResolutions;
@@ -81,6 +90,10 @@ public class SettingsView : MonoBehaviour, ILobbyView
             bool selected = index == tab;
             _tabContents[index].SetActive(selected);
             _tabs[index].interactable = !selected;
+            _tabs[index].image.color = selected ? Color.white : Color.clear;
+            _tabLabels[index].color = selected
+                ? new Color32(240, 231, 210, 255)
+                : new Color(145f / 255f, 145f / 255f, 145f / 255f, 0.7f);
         }
 
         _eventSystem.SetSelectedGameObject(null);
@@ -277,6 +290,7 @@ public class SettingsView : MonoBehaviour, ILobbyView
         _masterVolumeSlider.interactable = false;
         _applyButton.interactable = false;
         _backButton.interactable = false;
+        _cancelButton.interactable = false;
         _resetButton.interactable = false;
         foreach (Button tab in _tabs) tab.interactable = false;
         _bindingPopup.gameObject.SetActive(true);
@@ -301,6 +315,25 @@ public class SettingsView : MonoBehaviour, ILobbyView
         _bindingNotice.text = !allowed ? "지원하지 않는 키입니다."
             : conflict < 0 ? string.Empty
             : $"이미 {_keyDescriptions[conflict].text}에 지정된 키입니다. 적용 시 기존 연결이 해제됩니다.";
+    }
+
+    void LateUpdate()
+    {
+        if (_settings == null) return;
+
+        RefreshDropdownArrows();
+    }
+
+    void RefreshDropdownArrows()
+    {
+        _combatTextArrow.sprite = _combatTextOption.IsExpanded
+            ? _openDropdownArrow : _closedDropdownArrow;
+
+        for (int index = 0; index < _graphicsOptions.Length; index++)
+        {
+            _graphicsArrows[index].sprite = _graphicsOptions[index].IsExpanded
+                ? _openDropdownArrow : _closedDropdownArrow;
+        }
     }
 
     static string ReadBinding()
@@ -378,6 +411,7 @@ public class SettingsView : MonoBehaviour, ILobbyView
         _masterVolumeSlider.interactable = true;
         RefreshApplyState();
         _backButton.interactable = true;
+        _cancelButton.interactable = true;
         _eventSystem.SetSelectedGameObject(_keyButtons[row].gameObject);
         return true;
     }
@@ -393,6 +427,8 @@ public class SettingsView : MonoBehaviour, ILobbyView
             _applyButton.onClick.RemoveListener(Apply);
         if (_backButton != null)
             _backButton.onClick.RemoveListener(RequestBack);
+        if (_cancelButton != null)
+            _cancelButton.onClick.RemoveListener(RequestBack);
 
         if (_settings != null)
         {
@@ -545,20 +581,26 @@ public class SettingsView : MonoBehaviour, ILobbyView
             _ambientVolumeSlider == null || _applyButton == null ||
             _bindingPopup == null || _candidateLabel == null || _bindingNotice == null ||
             _resetButton == null || _confirmBinding == null || _cancelBinding == null ||
-            _tabs == null || _tabs.Length != 4 || Array.Exists(_tabs, button => button == null) ||
+            _tabs == null || _tabs.Length != 4 || Array.Exists(_tabs, button => button == null || button.image == null) ||
+            _tabLabels == null || _tabLabels.Length != _tabs.Length ||
+            Array.Exists(_tabLabels, label => label == null) ||
             _tabContents == null || _tabContents.Length != _tabs.Length ||
             Array.Exists(_tabContents, content => content == null) ||
             _cursorScaleSlider == null || _cursorHueSlider == null || _cursorColorPreview == null ||
             _combatTextOption == null || _combatTextOption.template == null ||
             _graphicsOptions == null || _graphicsOptions.Length != 3 ||
             Array.Exists(_graphicsOptions, dropdown => dropdown == null || dropdown.template == null) ||
+            _combatTextArrow == null || _graphicsArrows == null ||
+            _graphicsArrows.Length != _graphicsOptions.Length ||
+            Array.Exists(_graphicsArrows, arrow => arrow == null) ||
+            _closedDropdownArrow == null || _openDropdownArrow == null ||
             _keyButtons == null || _keyButtons.Length != SettingsBindings.Names.Length ||
             Array.Exists(_keyButtons, button => button == null) ||
             _keyLabels == null || _keyLabels.Length != _keyButtons.Length ||
             Array.Exists(_keyLabels, label => label == null) ||
             _keyDescriptions == null || _keyDescriptions.Length != _keyButtons.Length ||
             Array.Exists(_keyDescriptions, label => label == null) ||
-            _backButton == null || _statusText == null)
+            _backButton == null || _cancelButton == null || _statusText == null)
             throw new MissingReferenceException($"{name}: 옵션 화면 참조 연결 필요");
 
         if (!eventSystem.isActiveAndEnabled || eventSystem.gameObject.scene != gameObject.scene)
@@ -568,8 +610,10 @@ public class SettingsView : MonoBehaviour, ILobbyView
         settings.Initialize();
         _settings = settings;
         _eventSystem = eventSystem;
+        RefreshDropdownArrows();
         _applyButton.onClick.AddListener(Apply);
         _backButton.onClick.AddListener(RequestBack);
+        _cancelButton.onClick.AddListener(RequestBack);
         _saveConfirmationApply.onClick.AddListener(ApplyAndGoBack);
         _saveConfirmationDiscard.onClick.AddListener(DiscardAndGoBack);
         _resetButton.onClick.AddListener(ResetTab);

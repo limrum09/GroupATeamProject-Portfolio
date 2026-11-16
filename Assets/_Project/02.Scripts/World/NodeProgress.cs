@@ -69,6 +69,7 @@ public class NodeProgress : MonoBehaviour
     void HandleAreaCleared()
     {
         _cleared[_activeArea] = true;
+        SetProgressBlockerActive(_activeArea, false);
         _activeArea = -1;
         _hasFailure = false;
         foreach (bool cleared in _cleared)
@@ -91,8 +92,57 @@ public class NodeProgress : MonoBehaviour
         OnProgressFailed?.Invoke();
     }
 
+    void ValidateProgressBlockers()
+    {
+        for (int i = 0; i < _map.CombatAreas.Count; i++)
+        {
+            MapBindings.CombatAreaBinding area = _map.GetCombatArea(i);
+            GameObject blocker = area.ProgressBlocker;
+
+            // 차단판이 없는 구역 허용
+            if (blocker == null) continue;
+
+            Transform blockerRoot = blocker.transform;
+            if (blockerRoot == area.Root ||
+                !blockerRoot.IsChildOf(area.Root) ||
+                blocker.scene != _map.gameObject.scene)
+            {
+                throw new InvalidOperationException(
+                    $"{_map.name}: 해당 구역 하위의 차단판 연결 필요");
+            }
+
+            if (area.EntryArea != null &&
+                area.EntryArea.transform.IsChildOf(blockerRoot))
+            {
+                throw new InvalidOperationException(
+                    $"{_map.name}: 진입 영역과 차단판의 계층 분리 필요");
+            }
+
+            if (area.SpawnAreas == null)
+                throw new InvalidOperationException($"{_map.name}: 소환 범위 목록 구성 필요");
+
+            foreach (SphereCollider spawnArea in area.SpawnAreas)
+            {
+                if (spawnArea != null &&
+                    spawnArea.transform.IsChildOf(blockerRoot))
+                {
+                    throw new InvalidOperationException(
+                        $"{_map.name}: 소환 범위와 차단판의 계층 분리 필요");
+                }
+            }
+        }
+    }
+
+    void SetProgressBlockerActive(int areaIndex, bool active)
+    {
+        GameObject blocker = _map.CombatAreas[areaIndex].ProgressBlocker;
+        if (blocker == null) return;
+
+        blocker.SetActive(active);
+    }
+
     /// <summary>
-    /// 클리어 기록을 보존한 노드 진입과 구역 설정 검증
+    /// 클리어 기록을 보존한 노드 진입과 구역 설정 및 차단판 상태 적용
     /// </summary>
     /// <param name="node">진입을 확정한 노드</param>
     /// <param name="alreadyCleared">월드에 기록된 클리어 여부</param>
@@ -105,6 +155,17 @@ public class NodeProgress : MonoBehaviour
 
         _map = node.Map;
         IsNodeCleared = alreadyCleared;
+        if (node.Type == MapBindings.MapType.Combat ||
+            node.Type == MapBindings.MapType.Boss)
+        {
+            if (_map.CombatAreas == null || _map.CombatAreas.Count == 0)
+                throw new InvalidOperationException($"{_map.name}: 전투 구역 연결 필요");
+
+            ValidateProgressBlockers();
+            for (int i = 0; i < _map.CombatAreas.Count; i++)
+                SetProgressBlockerActive(i, !alreadyCleared);
+        }
+
         if (alreadyCleared)
             return;
 
@@ -115,8 +176,6 @@ public class NodeProgress : MonoBehaviour
             return;
         }
 
-        if (_map.CombatAreas == null || _map.CombatAreas.Count == 0)
-            throw new InvalidOperationException($"{_map.name}: 전투 구역 연결 필요");
         _cleared = new bool[_map.CombatAreas.Count];
         for (int i = 0; i < _cleared.Length; i++)
         {

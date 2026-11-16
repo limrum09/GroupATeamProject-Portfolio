@@ -11,13 +11,13 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
 {
-    [Header("----- 왼쪽 슬롯 순서 -----")]
-    [SerializeField]
-    MetaUpgradeSlotView[] _slots = Array.Empty<MetaUpgradeSlotView>();
+    [Header("----- 왼쪽 장착 슬롯 영역 -----")]
+    [SerializeField] MetaLoadoutLayoutView _loadoutLayoutView;
 
     [Header("----- 오른쪽 데이터 표시 순서 -----")]
     [SerializeField]
     MetaUpgradeSlotView[] _catalog = Array.Empty<MetaUpgradeSlotView>();
+    [SerializeField] MetaUpgradeIconCatalog _iconCatalog;
 
     [Header("----- 캐릭터와 재화 -----")]
     [SerializeField] TextMeshProUGUI _characterName;
@@ -30,7 +30,6 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
     [SerializeField] Slider _masteryExperienceSlider;
 
     [Header("----- 상세 정보 -----")]
-    [SerializeField] Image _detailIcon;
     [SerializeField] TextMeshProUGUI _detailName;
     [SerializeField] TextMeshProUGUI _detailRank;
     [SerializeField] TextMeshProUGUI _detailDescription;
@@ -45,7 +44,8 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
     [Header("----- 공용 드래그 표시 -----")]
     [SerializeField] SkillDragIconView _dragIcon;
 
-    Sprite[] _catalogIcons;
+    Color _normalPriceColor;
+    MetaUpgradeIconEntry[] _catalogIcons;
     SkillSlotDragInput _dragSource;
     Vector2 _dragPosition;
     bool _inputEnabled;
@@ -61,11 +61,8 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
 
     void Awake()
     {
-        _catalogIcons = new Sprite[_catalog.Length];
-
-        for (int i = 0; i < _catalog.Length; i++)
-            _catalogIcons[i] = _catalog[i].Icon;
-
+        _normalPriceColor = _priceText.color;
+        _catalogIcons = new MetaUpgradeIconEntry[_catalog.Length];
         Clear();
     }
 
@@ -119,7 +116,7 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
 
     IEnumerable<MetaUpgradeSlotView> AllSlots()
     {
-        foreach (MetaUpgradeSlotView slot in _slots)
+        foreach (MetaUpgradeSlotView slot in _loadoutLayoutView.Slots)
             yield return slot;
 
         foreach (MetaUpgradeSlotView slot in _catalog)
@@ -130,7 +127,7 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
     {
         if (!_inputEnabled) return;
 
-        int index = Array.IndexOf(_slots, source);
+        int index = FindDestination(source.gameObject);
 
         if (index >= 0)
         {
@@ -149,9 +146,9 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
 
         Transform hit = hitObject.transform;
 
-        for (int i = 0; i < _slots.Length; i++)
+        for (int i = 0; i < _loadoutLayoutView.Slots.Count; i++)
         {
-            Transform slot = _slots[i].transform;
+            Transform slot = _loadoutLayoutView.Slots[i].transform;
 
             if (hit == slot || hit.IsChildOf(slot))
                 return i;
@@ -168,7 +165,7 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
             return;
         }
 
-        int index = Array.FindIndex(_slots, slot => slot.DragInput == source);
+        int index = FindDestination(source.gameObject);
 
         bool fromLoadout = index >= 0;
 
@@ -230,6 +227,15 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
 #endif
 
     /// <summary>
+    /// 선택한 캐릭터의 왼쪽 장착 슬롯 배치
+    /// </summary>
+    /// <param name="playerClass">선택한 캐릭터 직업</param>
+    public void ShowLoadoutLayout(PlayerClass playerClass)
+    {
+        _loadoutLayoutView.ShowLayout(playerClass);
+    }
+
+    /// <summary>
     /// 캐릭터 이름과 보유 재화 표시
     /// </summary>
     /// <param name="characterName">캐릭터 이름</param>
@@ -247,37 +253,50 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
     /// <param name="rank">구매 단계 문자열</param>
     /// <param name="equipped">장착 여부</param>
     /// <param name="selected">선택 여부</param>
-    public void ShowCatalog(int index, string rank, bool equipped, bool selected)
+    public void ShowCatalog(int index, string upgradeId, string rank, bool equipped, bool selected, int lockedUntilLevel)
     {
-        _catalog[index].Show(_catalogIcons[index], rank, equipped, selected);
+        MetaUpgradeIconEntry icons = _catalogIcons[index];
+
+        if (icons == null || icons.UpgradeId != upgradeId)
+        {
+            icons = _iconCatalog.Get(upgradeId);
+            _catalogIcons[index] = icons;
+        }
+
+        Sprite icon = icons.Available;
+
+        if (lockedUntilLevel > 0)
+            icon = icons.Unavailable;
+        else if (equipped)
+            icon = icons.Equipped;
+
+        _catalog[index].Show(icon, rank, equipped, selected, lockedUntilLevel);
     }
 
     /// <summary>
     /// 왼쪽 장착 슬롯 표시
     /// </summary>
-    /// <param name="slot">슬롯 번호</param>
-    /// <param name="catalogIndex">목록 인덱스, 빈 슬롯은 -1</param>
-    /// <param name="selected">선택 여부</param>
-    public void ShowSlot(int slot, int catalogIndex, bool selected)
+    /// <param name="slot">왼쪽 슬롯 번호</param>
+    /// <param name="catalogIndex">오른쪽 목록 인덱스, 빈 슬롯은 -1</param>
+    /// <param name="unlocked">슬롯 해금 여부</param>
+    /// <param name="hideIcon">원래 위치의 아이콘 숨김 여부</param>
+    public void ShowSlot(int slot, int catalogIndex, bool unlocked, bool hideIcon, int unlockLevel)
     {
-        Sprite icon = catalogIndex < 0 ? null : _catalogIcons[catalogIndex];
+        bool hasUpgrade = catalogIndex >= 0;
+        Sprite visibleIcon = hasUpgrade && !hideIcon ? _catalogIcons[catalogIndex].Available : null;
 
-        _slots[slot].Show(icon, string.Empty, false, selected);
+        _loadoutLayoutView.ShowSlot(slot, visibleIcon, unlocked, hasUpgrade, unlockLevel);
     }
 
     /// <summary>
     /// 선택한 강화의 상세 정보 표시
     /// </summary>
-    /// <param name="catalogIndex">목록 인덱스, 미선택은 -1</param>
     /// <param name="upgradeName">강화 이름</param>
     /// <param name="rank">구매 단계 문자열</param>
     /// <param name="description">효과 설명</param>
     /// <param name="price">구매 비용 문자열</param>
-    public void ShowDetails(int catalogIndex, string upgradeName, string rank, string description, string price)
+    public void ShowDetails(string upgradeName, string rank, string description, string price)
     {
-        _detailIcon.sprite = catalogIndex < 0 ? null : _catalogIcons[catalogIndex];
-
-        _detailIcon.enabled = catalogIndex >= 0;
         _detailName.text = upgradeName;
         _detailRank.text = rank;
         _detailDescription.text = description;
@@ -317,16 +336,22 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
     /// <param name="purchase">구매 입력 허용 여부</param>
     /// <param name="close">닫기 입력 허용 여부</param>
     /// <param name="purchaseLabel">구매 버튼 문구</param>
-    public void SetInteraction(bool inspect, bool purchase, bool close, string purchaseLabel)
+    /// <param name="levelLocked">선택한 강화의 통합 레벨 미달 여부</param>
+    public void SetInteraction(bool inspect, bool purchase, bool close, string purchaseLabel, bool levelLocked = false)
     {
         _inputEnabled = inspect;
 
         foreach (MetaUpgradeSlotView slot in AllSlots())
+        {
             slot.SetInput(inspect);
+        }   
 
+        _purchaseButton.gameObject.SetActive(!levelLocked);
         _purchaseButton.interactable = purchase;
         _closeButton.interactable = close;
         _purchaseLabel.text = purchaseLabel;
+
+        _priceText.color = levelLocked ? _messageText.color : _normalPriceColor;
     }
 
     /// <summary>
@@ -353,7 +378,9 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
     /// <param name="catalogIndex">목록 인덱스</param>
     public void ShowDragIcon(int catalogIndex)
     {
-        _dragIcon.Show(_catalogIcons[catalogIndex], _dragPosition);
+        MetaUpgradeIconEntry icons = _catalogIcons[catalogIndex];
+        Sprite icon = icons.Available;
+        _dragIcon.Show(icon, _dragPosition);
     }
 
     /// <summary>
@@ -388,12 +415,11 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
         _masteryExperienceSlider.SetValueWithoutNotify(0f);
 
         for (int i = 0; i < _catalog.Length; i++)
-            ShowCatalog(i, "—", false, false);
+            _catalog[i].Show(null, "—", false, false, 0);
 
-        for (int i = 0; i < _slots.Length; i++)
-            ShowSlot(i, -1, false);
+        _loadoutLayoutView.Clear();
 
-        ShowDetails(-1, string.Empty, string.Empty, "강화를 선택하세요.", "—");
+        ShowDetails(string.Empty, string.Empty, "강화를 선택하세요.", "—");
 
         SetInteraction(false, false, true, "강화");
         ShowRestriction(string.Empty);
@@ -421,10 +447,18 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
     /// </summary>
     public void ValidateBindings()
     {
-        if (_slots == null || _slots.Length != MetaProgression.EquipSlotCount || _catalog == null || _catalog.Length == 0)
-            throw new InvalidOperationException($"{name}: 왼쪽 6슬롯과 오른쪽 강화 목록 연결 필요");
+        if (_loadoutLayoutView == null)
+            throw new MissingReferenceException($"{name}: 왼쪽 장착 슬롯 영역 연결 필요");
 
-        if (_characterName == null || _currencyText == null || _detailIcon == null || _detailName == null || _detailRank == null || _detailDescription == null || _priceText == null || _messageText == null ||
+        _loadoutLayoutView.ValidateBindings();
+
+        if (_iconCatalog == null)
+            throw new MissingReferenceException($"{name}: 메타 강화 아이콘 카탈로그 연결 필요");
+
+        if (_catalog == null || _catalog.Length == 0)
+            throw new InvalidOperationException($"{name}: 오른쪽 강화 목록 연결 필요");
+
+        if (_characterName == null || _currencyText == null || _detailName == null || _detailRank == null || _detailDescription == null || _priceText == null || _messageText == null ||
             _purchaseButton == null || _purchaseLabel == null || _closeButton == null || _dragIcon == null)
         {
             throw new MissingReferenceException($"{name}: 메타 화면의 표시와 버튼 참조 연결 필요");
@@ -435,7 +469,7 @@ public class MetaUpgradeView : MonoBehaviour, IMetaUpgradeView, ILobbyView
 
         HashSet<MetaUpgradeSlotView> unique = new HashSet<MetaUpgradeSlotView>();
 
-        foreach (MetaUpgradeSlotView slot in _slots)
+        foreach (MetaUpgradeSlotView slot in _loadoutLayoutView.Slots)
             ValidateSlot(slot, false, unique);
 
         foreach (MetaUpgradeSlotView slot in _catalog)

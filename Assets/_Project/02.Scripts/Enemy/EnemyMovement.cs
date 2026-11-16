@@ -98,6 +98,10 @@ public class EnemyMovement : MonoBehaviour, IChargeMovement
         }
 
         Vector3 start = _agent.nextPosition;
+
+        if (!_combat.CanMove)
+            return false;
+
         Vector3 probe = start + direction * Mathf.Min(distance, _arrivalDistance);
         bool blocked = _agent.Raycast(probe, out NavMeshHit hit);
         return !blocked || (hit.position - start).sqrMagnitude > 0.000001f;

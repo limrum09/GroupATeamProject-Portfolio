@@ -461,7 +461,8 @@ public class SessionInitializer : MonoBehaviour
             _shop.BindPurchases(_purchases);
 
             _ui.OnShopStateChanged += _controls.SetShopOpen;
-            _ui.Bind(_world, _shop, _purchases, player.Loadout, playerDefinition, progression, player.Status, _economy);
+            _ui.Bind(_world, _shop, _purchases, player.Loadout, playerDefinition,
+                progression, player.Status, _economy, player);
 
             _controls.SetShopOpen(_ui.IsShopOpen);
 

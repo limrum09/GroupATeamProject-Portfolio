@@ -50,7 +50,7 @@ public sealed class MetaUpgradeData
     public string UpgradeId { get; }
     public string DisplayName { get; }
     public string Description { get; }
-    public string IconId { get; }
+    public int RequiredIntegratedLevel { get; }
     public string Category { get; }
     public string TargetCharacterId { get; }
     public int SortOrder { get; }
@@ -61,18 +61,28 @@ public sealed class MetaUpgradeData
     // 검증된 연속 구매 단계 수로 결정되는 최대 단계
     public int MaxRank => Ranks.Count;
 
-    internal MetaUpgradeData(string upgradeId, string displayName, string description, string iconId, string category, string targetCharacterId, int sortOrder, bool enabled, List<MetaUpgradeRankData> ranks)
+    public MetaUpgradeData(string upgradeId, string displayName, string description, int requiredIntegratedLevel, string category, string targetCharacterId, int sortOrder, bool enabled, List<MetaUpgradeRankData> ranks)
     {
         UpgradeId = upgradeId;
         DisplayName = displayName;
         Description = description;
-        IconId = iconId;
+        RequiredIntegratedLevel = requiredIntegratedLevel;
         Category = category;
         TargetCharacterId = targetCharacterId;
         SortOrder = sortOrder;
         Enabled = enabled;
 
         Ranks = new List<MetaUpgradeRankData>(ranks).AsReadOnly();
+    }
+
+    /// <summary>
+    /// 계정 통합 숙련도에 따른 강화 해금 여부
+    /// </summary>
+    /// <param name="integratedLevel">현재 계정 통합 숙련도 레벨</param>
+    /// <returns>요구 통합 레벨 충족 여부</returns>
+    public bool IsUnlockedAt(int integratedLevel)
+    {
+        return integratedLevel >= RequiredIntegratedLevel;
     }
 
     /// <summary>

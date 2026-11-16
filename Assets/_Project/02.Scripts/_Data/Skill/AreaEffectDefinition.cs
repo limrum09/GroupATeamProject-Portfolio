@@ -45,6 +45,7 @@ public sealed class AreaEffectDefinition : ScriptableObject
     [SerializeField] AreaEffectFirstPulse _firstPulse = AreaEffectFirstPulse.Immediate;
     [SerializeField, Min(0.01f)] float _pulseInterval = 0.5f;
     [SerializeField, Min(0.01f)] float _duration = 3f;
+    [SerializeField, Min(1)] int _hitsPerPulse = 1;
     [SerializeField, Min(1)] int _pulseCount = 5;
 
     [Header("----- 대상과 차단 -----")]
@@ -61,6 +62,7 @@ public sealed class AreaEffectDefinition : ScriptableObject
     public AreaEffectFirstPulse FirstPulse => _firstPulse;
     public float PulseInterval => _pulseInterval;
     public float Duration => _duration;
+    public int HitsPerPulse => _hitsPerPulse;
     public int PulseCount => _pulseCount;
     /// 생성 시점의 범위 타격 여부, 1회형은 항상 즉시 타격
     public bool HasImmediatePulse => _damageMode == AreaEffectDamageMode.Once || _firstPulse == AreaEffectFirstPulse.Immediate;
@@ -78,6 +80,7 @@ public sealed class AreaEffectDefinition : ScriptableObject
         _spellPowerMultiplier = Mathf.Max(0f, _spellPowerMultiplier);
         _pulseInterval = Mathf.Max(0.01f, _pulseInterval);
         _duration = Mathf.Max(0.01f, _duration);
+        _hitsPerPulse = Mathf.Max(1, _hitsPerPulse);
         _pulseCount = Mathf.Max(1, _pulseCount);
 
         ValidateTiming();

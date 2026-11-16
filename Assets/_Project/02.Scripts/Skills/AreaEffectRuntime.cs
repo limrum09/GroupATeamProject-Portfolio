@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using System;
 
 /// <summary>
 /// 범위 효과의 위치와 반복 타격 및 종료 관리
@@ -11,6 +12,7 @@ public sealed class AreaEffectRuntime : MonoBehaviour
     AreaEffectDefinition _definition;
 
     CombatTarget _followCaster;
+    Guid? _excludedTargetId;
     Vector3 _followOffset;
 
     Vector3 _origin;
@@ -88,7 +90,7 @@ public sealed class AreaEffectRuntime : MonoBehaviour
         _nextPulseAt = now + _definition.PulseInterval;
         _pulseCount++;
 
-        AreaEffectExecutor.ExecutePulse(_execution, _origin, _rotation, Vector3.zero, _definition.Hitbox, _definition.TargetMask, _definition.BlockingMask, _power);
+        AreaEffectExecutor.ExecutePulse(_execution, _origin, _rotation, Vector3.zero, _definition.Hitbox, _definition.TargetMask, _definition.BlockingMask, _power, _definition.HitsPerPulse, _excludedTargetId);
 
         // 시작한 한 회차는 완료하고 이후 회차의 지속 여부 검사
         if (!CanRemainActive() || (_definition.EndMode == AreaEffectEndMode.PulseCount && _pulseCount >= _definition.PulseCount))
@@ -114,15 +116,26 @@ public sealed class AreaEffectRuntime : MonoBehaviour
         }
     }
 
-    public void Initialize(SkillExecutionContext execution, AreaEffectDefinition definition, Vector3 origin, Quaternion rotation, float power, double startedAt, int initialPulseCount, CombatTarget followCaster)
+    /// <summary>
+    /// 반복 범위 효과의 위치, 회차 및 제외 대상 초기화
+    /// </summary>
+    /// <param name="execution">발동 단위 실행 정보</param>
+    /// <param name="definition">범위 효과 설정</param>
+    /// <param name="origin">최초 범위 기준 위치</param>
+    /// <param name="rotation">범위 기준 회전</param>
+    /// <param name="power">방어력과 치명타 적용 전 타격당 위력</param>
+    /// <param name="startedAt">범위 효과 시작 시각</param>
+    /// <param name="initialPulseCount">초기화 전에 실행한 회차 수</param>
+    /// <param name="followCaster">추적할 시전자</param>
+    /// <param name="excludedTargetId">모든 회차에서 제외할 직격 대상의 활성화 식별값</param>
+    public void Initialize(SkillExecutionContext execution, AreaEffectDefinition definition, Vector3 origin, Quaternion rotation, float power, double startedAt, int initialPulseCount, CombatTarget followCaster, Guid? excludedTargetId = null)
     {
         _execution = execution;
         _definition = definition;
+        _excludedTargetId = excludedTargetId;
 
         _followCaster = followCaster;
-        _followOffset = FollowsCaster
-            ? origin - execution.SourcePosition
-            : Vector3.zero;
+        _followOffset = FollowsCaster ? origin - execution.SourcePosition : Vector3.zero;
 
         _origin = origin;
         _rotation = rotation;
@@ -143,4 +156,21 @@ public sealed class AreaEffectRuntime : MonoBehaviour
     {
         return caster != null && caster.IsAlive && caster.Source.Id == execution.Source.Id && caster.gameObject.scene == execution.SourceScene;
     }
+
+#if UNITY_EDITOR
+    void OnDrawGizmos()
+    {
+        if (UnityEditor.SceneView.currentDrawingSceneView == null)
+            return;
+
+        // 초기화 이전 또는 종료된 범위의 표시 제외
+        if (!isActiveAndEnabled || _finished || _execution == null || _definition == null)
+            return;
+
+        if (!CanRemainActive())
+            return;
+
+        CombatHitQuery.DrawPreview(_origin, _rotation, Vector3.zero, _definition.Hitbox);
+    }
+#endif
 }

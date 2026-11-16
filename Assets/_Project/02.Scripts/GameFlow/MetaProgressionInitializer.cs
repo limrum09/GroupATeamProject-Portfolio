@@ -349,7 +349,7 @@ public sealed class MetaProgressionInitializer : MonoBehaviour
                     _initialProfile = data;
             }
 
-            progression.RestorePurchases(data.Purchases.Select(row => new MetaUpgradeRecord( row.CharacterId, row.UpgradeId, row.Rank)).ToArray());
+            progression.RestorePurchases(data.Purchases.Select(row => new MetaUpgradeRecord(row.UpgradeId, row.Rank)).ToArray());
             progression.RestoreLoadouts(data.Loadouts.Select(row => new MetaLoadoutRecord(row.CharacterId, row.Slots)).ToArray());
             progression.RestoreMastery(data.Mastery.Select(row => new MetaMasteryRecord(row.CharacterId, row.TotalExperience)).ToArray());
 

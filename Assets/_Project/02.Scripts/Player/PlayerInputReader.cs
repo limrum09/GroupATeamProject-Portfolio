@@ -35,6 +35,9 @@ public sealed class PlayerInputReader : MonoBehaviour
 
     readonly InputAction[] _skillActions = new InputAction[4];
 
+    // 접수된 이동 클릭 위치와 공격 이동 여부
+    public event System.Action<Vector3, bool> OnGroundClickAccepted;
+
     public PlayerController Controller => _controller;
     // 씬 입력 참조와 포인터 데이터의 준비 완료 여부
     public bool HasSceneBindings => _camera != null && _eventSystem != null && _pointerData != null;
@@ -127,11 +130,13 @@ public sealed class PlayerInputReader : MonoBehaviour
 
         if (moveClicked)
         {
-            _controller.RequestMove(position);
+            if (_controller.RequestMove(position))
+                OnGroundClickAccepted?.Invoke(position, false);
         }
         else
         {
-            _controller.RequestAttack(position, target);
+            if (_controller.RequestAttack(position, target) && target == null)
+                OnGroundClickAccepted?.Invoke(position, true);
         }
     }
 

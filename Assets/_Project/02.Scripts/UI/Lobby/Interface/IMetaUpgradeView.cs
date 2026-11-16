@@ -28,25 +28,25 @@ public interface IMetaUpgradeView
     /// <param name="rank">구매 단계 문자열</param>
     /// <param name="equipped">현재 캐릭터의 장착 여부</param>
     /// <param name="selected">상세 정보 선택 여부</param>
-    void ShowCatalog(int index, string rank, bool equipped, bool selected);
+    void ShowCatalog(int index, string upgradeId, string rank, bool equipped, bool selected, int lockedUntilLevel);
 
     /// <summary>
     /// 왼쪽 장착 슬롯 표시
     /// </summary>
-    /// <param name="slot">슬롯 번호</param>
-    /// <param name="catalogIndex">목록 인덱스, 빈 슬롯은 -1</param>
-    /// <param name="selected">선택 표시 여부</param>
-    void ShowSlot(int slot, int catalogIndex, bool selected);
+    /// <param name="slot">장착 슬롯 번호</param>
+    /// <param name="catalogIndex">장착한 강화의 목록 인덱스, 빈칸은 -1</param>
+    /// <param name="unlocked">슬롯 해금 여부</param>
+    /// <param name="hideIcon">드래그 또는 저장 처리 중 아이콘 숨김 여부</param>
+    void ShowSlot(int slot, int catalogIndex, bool unlocked, bool hideIcon, int unlockLevel);
 
     /// <summary>
     /// 선택한 강화의 상세 정보 표시
     /// </summary>
-    /// <param name="catalogIndex">아이콘을 가져올 목록 인덱스, 없으면 -1</param>
     /// <param name="upgradeName">강화 이름</param>
     /// <param name="rank">구매 단계 문자열</param>
     /// <param name="description">효과 설명</param>
     /// <param name="price">구매 비용 문자열</param>
-    void ShowDetails(int catalogIndex, string upgradeName, string rank, string description, string price);
+    void ShowDetails(string upgradeName, string rank, string description, string price);
 
     /// <summary>
     /// 입력 허용 상태와 구매 버튼 문구 표시
@@ -55,7 +55,8 @@ public interface IMetaUpgradeView
     /// <param name="purchase">구매 버튼 허용 여부</param>
     /// <param name="close">닫기 버튼 허용 여부</param>
     /// <param name="purchaseLabel">구매 버튼 문구</param>
-    void SetInteraction(bool inspect, bool purchase, bool close, string purchaseLabel);
+    /// <param name="levelLocked">선택한 강화의 통합 레벨 미달 여부</param>
+    void SetInteraction(bool inspect, bool purchase, bool close, string purchaseLabel, bool levelLocked = false);
 
     /// <summary>
     /// 계정 공통 통합 숙련도 레벨 표시
@@ -83,6 +84,12 @@ public interface IMetaUpgradeView
     /// </summary>
     /// <param name="catalogIndex">아이콘을 가져올 목록 인덱스</param>
     void ShowDragIcon(int catalogIndex);
+
+    /// <summary>
+    /// 선택한 캐릭터의 왼쪽 슬롯 위치와 연결선 배치
+    /// </summary>
+    /// <param name="playerClass">선택한 캐릭터 직업</param>
+    void ShowLoadoutLayout(PlayerClass playerClass);
 
     /// <summary>
     /// 취소 이벤트를 다시 발생시키지 않고 드래그 정리

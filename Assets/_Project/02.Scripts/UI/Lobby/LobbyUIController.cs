@@ -100,8 +100,16 @@ public class LobbyUIController : MonoBehaviour
 
         Mouse mouse = Mouse.current;
 
-        if (mouse != null && mouse.rightButton.wasPressedThisFrame)
-            OpenHome();
+        if (mouse == null || !mouse.rightButton.wasPressedThisFrame)
+            return;
+
+        if (IsCurrentPanel(LobbyPanelType.Story) &&
+            _storyView.TryCancelUnlockConfirmation())
+        {
+            return;
+        }
+
+        OpenHome();
     }
 
     void OnEnable()
@@ -285,6 +293,12 @@ public class LobbyUIController : MonoBehaviour
 
     void HandleMenuCancel()
     {
+        if (IsCurrentPanel(LobbyPanelType.Story) &&
+            _storyView.TryCancelUnlockConfirmation())
+        {
+            return;
+        }
+
         if (IsCurrentPanel(LobbyPanelType.Settings) && _settingsView.TryHandleBack()) return;
 
         if (IsCurrentPanel(LobbyPanelType.Home) || IsCurrentPanel(LobbyPanelType.Settings))

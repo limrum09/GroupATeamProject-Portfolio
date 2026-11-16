@@ -31,6 +31,15 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
     [SerializeField] Button _closeContentButton;
     [SerializeField] Button _unlockButton;
 
+    [Header("----- 스토리 해금 확인 -----")]
+    [SerializeField] GameObject _unlockConfirmation;
+    [SerializeField] CanvasGroup _unlockConfirmationGroup;
+    [SerializeField] Image _unlockConfirmationBlocker;
+    [SerializeField] Button _confirmUnlockButton;
+    [SerializeField] Button _cancelUnlockButton;
+
+    bool _interactionAllowed;
+
     public event Action CloseRequested;
     public event Action UnlockRequested;
 
@@ -41,6 +50,8 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
         _closeButton.onClick.AddListener(HandleCloseClicked);
         _closeContentButton.onClick.AddListener(HideStory);
         _unlockButton.onClick.AddListener(HandleUnlockClicked);
+        _confirmUnlockButton.onClick.AddListener(HandleConfirmUnlockClicked);
+        _cancelUnlockButton.onClick.AddListener(CloseUnlockConfirmation);
     }
 
     void OnDisable()
@@ -53,11 +64,57 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
 
         if (_unlockButton != null)
             _unlockButton.onClick.RemoveListener(HandleUnlockClicked);
+
+        if (_confirmUnlockButton != null)
+            _confirmUnlockButton.onClick.RemoveListener(HandleConfirmUnlockClicked);
+
+        if (_cancelUnlockButton != null)
+            _cancelUnlockButton.onClick.RemoveListener(CloseUnlockConfirmation);
+
+        _interactionAllowed = false;
+
+        if (_unlockConfirmation != null)
+            CloseUnlockConfirmation();
     }
 
     void HandleUnlockClicked()
     {
-        UnlockRequested?.Invoke();
+        if (!_interactionAllowed || !_unlockButton.gameObject.activeInHierarchy ||
+            _unlockConfirmation.activeSelf)
+        {
+            return;
+        }
+
+        _unlockConfirmation.SetActive(true);
+        RefreshInteraction();
+    }
+
+    void HandleConfirmUnlockClicked()
+    {
+        if (!_unlockConfirmation.activeSelf) return;
+
+        bool canRequest = _interactionAllowed && _storyContentWindow.activeInHierarchy &&
+            _unlockButton.gameObject.activeSelf;
+
+        // 기존 해금 요청에서 조건을 재검사하기 전 중복 확인 입력 차단
+        CloseUnlockConfirmation();
+
+        if (canRequest)
+            UnlockRequested?.Invoke();
+    }
+
+    void CloseUnlockConfirmation()
+    {
+        _unlockConfirmation.SetActive(false);
+        RefreshInteraction();
+    }
+
+    void RefreshInteraction()
+    {
+        bool allowStoryInput = _interactionAllowed && !_unlockConfirmation.activeSelf;
+        _canvasGroup.interactable = allowStoryInput;
+        _closeButton.interactable = allowStoryInput;
+        _unlockConfirmationGroup.interactable = _interactionAllowed;
     }
 
     void HandleCloseClicked()
@@ -124,6 +181,29 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
 
         if (_masteryLevelText == null || _masteryGaugeFill == null)
             throw new MissingReferenceException($"{name}: 숙련도 레벨 텍스트와 게이지 연결 필요");
+
+        if (_unlockConfirmation == null || _unlockConfirmationGroup == null ||
+            _unlockConfirmationBlocker == null || _confirmUnlockButton == null ||
+            _cancelUnlockButton == null)
+        {
+            throw new MissingReferenceException($"{name}: 해금 확인창과 입력 차단 및 확인·취소 버튼 연결 필요");
+        }
+
+        if (_unlockConfirmation == gameObject || !_unlockConfirmation.transform.IsChildOf(transform) ||
+            _unlockConfirmationGroup.gameObject != _unlockConfirmation ||
+            _unlockConfirmationBlocker.gameObject != _unlockConfirmation ||
+            !_confirmUnlockButton.transform.IsChildOf(_unlockConfirmation.transform) ||
+            !_cancelUnlockButton.transform.IsChildOf(_unlockConfirmation.transform) ||
+            _confirmUnlockButton == _cancelUnlockButton)
+        {
+            throw new InvalidOperationException($"{name}: 스토리 하위 확인창과 서로 다른 확인·취소 버튼 배치 필요");
+        }
+
+        if (!_unlockConfirmationGroup.ignoreParentGroups || !_unlockConfirmationGroup.blocksRaycasts ||
+            !_unlockConfirmationBlocker.raycastTarget)
+        {
+            throw new InvalidOperationException($"{name}: 확인창의 부모 입력 제한 분리와 배경 입력 차단 설정 필요");
+        }
     }
 
     /// <summary>
@@ -134,7 +214,7 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
     /// <param name="requiredExperience">다음 레벨 필요 경험치, 최대 레벨은 0, 조회 불가 시 null</param>
     public void ShowMastery(int? level, long currentExperience, long? requiredExperience)
     {
-        _masteryLevelText.text = level.HasValue ? $"Lv. {level.Value:N0}" : "Lv. —";
+        _masteryLevelText.text = level.HasValue ? level.Value.ToString() : "—";
         if (!level.HasValue || !requiredExperience.HasValue)
         {
             _masteryGaugeFill.fillAmount = 0f;
@@ -152,6 +232,7 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
     /// <param name="visible">화면 표시 여부</param>
     public void SetVisible(bool visible)
     {
+        _interactionAllowed = false;
         _canvasGroup.alpha = visible ? 1f : 0f;
         _canvasGroup.interactable = false;
         _canvasGroup.blocksRaycasts = visible;
@@ -167,8 +248,8 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
     /// <param name="interactable">입력 허용 여부</param>
     public void SetInteraction(bool interactable)
     {
-        _canvasGroup.interactable = interactable;
-        _closeButton.interactable = interactable;
+        _interactionAllowed = interactable;
+        RefreshInteraction();
     }
 
     /// <summary>
@@ -178,6 +259,7 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
     /// <param name="body">표시할 스토리 본문</param>
     public void ShowStory(string title, string body)
     {
+        CloseUnlockConfirmation();
         _storyTitleText.text = title;
         _storyBodyText.text = body;
         _storyContentWindow.SetActive(true);
@@ -202,6 +284,7 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
     /// </summary>
     public void HideStory()
     {
+        CloseUnlockConfirmation();
         SetUnlockButtonVisible(false);
         _storyContentWindow.SetActive(false);
         _storyTitleText.text = string.Empty;
@@ -210,11 +293,25 @@ public class CharacterStoryView : MonoBehaviour, ILobbyView
     }
 
     /// <summary>
+    /// 열린 스토리 해금 확인창 취소
+    /// </summary>
+    /// <returns>확인창이 취소 입력을 소비했는지 여부</returns>
+    public bool TryCancelUnlockConfirmation()
+    {
+        if (!_unlockConfirmation.activeSelf)
+            return false;
+
+        CloseUnlockConfirmation();
+        return true;
+    }
+
+    /// <summary>
     /// 카메라 복귀 중 화면을 숨기고 뒤쪽 입력 차단 유지
     /// </summary>
     public void BeginClosing()
     {
         SetInteraction(false);
+        CloseUnlockConfirmation();
 
         _canvasGroup.alpha = 0f;
         _canvasGroup.blocksRaycasts = true;

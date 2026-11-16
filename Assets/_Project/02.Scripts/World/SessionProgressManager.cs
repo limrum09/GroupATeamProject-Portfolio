@@ -8,6 +8,17 @@ using UnityEngine.Serialization;
 /// </summary>
 public class SessionProgressManager : MonoBehaviour
 {
+    /// <summary>
+    /// 월드맵 이동 요청 결과
+    /// </summary>
+    public enum MapTravelResult
+    {
+        Rejected,
+        OutsidePortalRange,
+        PortalClosed,
+        Accepted
+    }
+
     [Header("----- 월드 연결 -----")]
     [SerializeField] WorldGraphManager _graph;
     [SerializeField] NodeMapAllocator _mapAllocator;
@@ -292,6 +303,29 @@ public class SessionProgressManager : MonoBehaviour
             (!_worldProgress.HasCurrentNode ||
              _worldProgress.IsCleared(_worldProgress.CurrentNodeId)) &&
             !_nodeProgressManager.IsBusy && _enemySpawnManager.EnemyCount == 0;
+    }
+
+    /// <summary>
+    /// 현재 포탈 거리와 노드 완료 상태에 따른 월드맵 이동 요청
+    /// </summary>
+    /// <param name="nodeId">목적 노드 ID</param>
+    /// <param name="actor">이동을 요청한 플레이어의 스킬 구성</param>
+    /// <returns>요청 접수 또는 거절 사유</returns>
+    public MapTravelResult TryEnterNodeFromMap(int nodeId, SkillLoadout actor)
+    {
+        if (!IsReady || IsTransitioning || _runClearRequested ||
+            actor == null || !_worldProgress.CanEnterNode(nodeId))
+            return MapTravelResult.Rejected;
+
+        Node current = _graph.GetNode(_worldProgress.CurrentNodeId);
+        WorldPortal portal = current.Map.Portal;
+        if (portal == null || !portal.IsInMapTravelRange(actor))
+            return MapTravelResult.OutsidePortalRange;
+
+        if (!_worldProgress.IsCleared(current.Id))
+            return MapTravelResult.PortalClosed;
+
+        return TryEnterNode(nodeId) ? MapTravelResult.Accepted : MapTravelResult.Rejected;
     }
 
     /// <summary>

@@ -23,6 +23,7 @@ public class WorldGraphGenerationSettings
 
     [Header("----- 생성 및 표시 설정 -----")]
     [SerializeField, Range(0f, 0.15f)] float _positionJitter = 0.08f;
+    [SerializeField, Range(0f, 0.5f)] float _centerPullStrength = 0.12f;
     [SerializeField, Min(1)] int _maximumAttempts = 32;
 
     public int BossDistance => _bossDistance;
@@ -36,6 +37,7 @@ public class WorldGraphGenerationSettings
     public int MinimumTwoConnectionNodes => _minimumTwoConnectionNodes;
     public int MaximumTwoConnectionNodes => _maximumTwoConnectionNodes;
     public float PositionJitter => _positionJitter;
+    public float CenterPullStrength => _centerPullStrength;
     public int MaximumAttempts => _maximumAttempts;
 
     /// <summary>
@@ -85,7 +87,8 @@ public class WorldGraphGenerationSettings
         if (float.IsNaN(_additionalConnectionChance) || float.IsInfinity(_additionalConnectionChance) ||
             _additionalConnectionChance < 0f || _additionalConnectionChance > 1f ||
             float.IsNaN(_positionJitter) || float.IsInfinity(_positionJitter) ||
-            _positionJitter < 0f || _positionJitter > 0.15f)
+            _positionJitter < 0f || _positionJitter > 0.15f ||
+            !(_centerPullStrength >= 0f && _centerPullStrength <= 0.5f))
         {
             throw new InvalidOperationException("유효한 연결 확률과 위치 보정 범위 필요");
         }

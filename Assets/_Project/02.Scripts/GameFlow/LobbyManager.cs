@@ -364,6 +364,17 @@ public sealed class LobbyManager : MonoBehaviour
         return _progression.GetEquippedUpgradeIds(_selectedCharacter.CharacterId);
     }
 
+    /// <summary>
+    /// 선택 캐릭터의 메타 장착 슬롯 해금 여부 조회
+    /// </summary>
+    /// <param name="slot">0부터 시작하는 장착 슬롯 번호</param>
+    /// <returns>슬롯 해금 여부</returns>
+    public bool IsEquipSlotUnlocked(int slot)
+    {
+        RequireMetaReady();
+        return _progression.IsEquipSlotUnlocked(_selectedCharacter.CharacterId, slot);
+    }
+
     public Task<MetaEquipStatus> RequestEquipAsync(int slotIndex, string upgradeId, string expectedUpgradeId)
     {
         return _loadouts.RequestEquipAsync(_selectedCharacter.CharacterId, slotIndex, upgradeId, expectedUpgradeId);

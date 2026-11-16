@@ -74,6 +74,18 @@ public class WorldPortal : MonoBehaviour, IInteractable
         _interactionCollider.enabled = available;
     }
 
+    bool IsActorInRange(SkillLoadout actor, float range)
+    {
+        if (!isActiveAndEnabled || actor == null || !actor.isActiveAndEnabled)
+            return false;
+
+        CombatController combat = actor.Combat;
+        return combat.isActiveAndEnabled && combat.Owner.IsAlive &&
+            combat.Owner.Team == CombatTeam.Player &&
+            actor.gameObject.scene == gameObject.scene &&
+            (combat.Owner.Position - transform.position).sqrMagnitude <= range * range;
+    }
+
 #if UNITY_EDITOR
     /// <summary>
     /// MapBindings 배치 도구에서 씬 전용 참조 연결
@@ -99,16 +111,17 @@ public class WorldPortal : MonoBehaviour, IInteractable
     /// <returns>현재 포탈 상호작용 가능 여부</returns>
     public bool CanInteract(SkillLoadout actor)
     {
-        if (!isActiveAndEnabled || actor == null || !actor.isActiveAndEnabled || !IsAvailable())
-            return false;
+        return isActiveAndEnabled && IsAvailable() && IsActorInRange(actor, _interactionRange);
+    }
 
-        Debug.Log("플레이어 확인");
-
-        CombatController combat = actor.Combat;
-        return combat.isActiveAndEnabled && combat.Owner.IsAlive &&
-            combat.Owner.Team == CombatTeam.Player &&
-            actor.gameObject.scene == gameObject.scene &&
-            (combat.Owner.Position - transform.position).sqrMagnitude <= _interactionRange * _interactionRange;
+    /// <summary>
+    /// 포탈 개방 상태와 무관한 월드맵 이동 요청 거리 검사
+    /// </summary>
+    /// <param name="actor">이동을 요청한 플레이어의 스킬 구성</param>
+    /// <returns>상호작용 거리의 1.2배 범위 내 접근 여부</returns>
+    public bool IsInMapTravelRange(SkillLoadout actor)
+    {
+        return IsActorInRange(actor, _interactionRange * 1.2f);
     }
 
     /// <summary>

@@ -22,6 +22,7 @@ public class RunSceneTestBootstrap : MonoBehaviour
 
     [Header("----- 테스트 실행 -----")]
     [SerializeField] bool _autoStartInEditor = true;
+    [SerializeField] bool _autoStartInBuild;
     [SerializeField] GameFlowController _gameFlow;
 
     [Header("----- 캐릭터 설정 -----")]
@@ -47,7 +48,19 @@ public class RunSceneTestBootstrap : MonoBehaviour
     [Tooltip("6개 슬롯의 UpgradeId, 빈 문자열은 미장착")]
     [SerializeField]string[] _equippedUpgradeIds = new string[MetaProgression.EquipSlotCount];
 
-#if UNITY_EDITOR
+
+    static string _restartScenePath;
+    static int _restartCharacterIndex = -1;
+
+    bool ShouldAutoStart => Application.isEditor ? _autoStartInEditor : _autoStartInBuild;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetCharacterSwitchState()
+    {
+        _restartScenePath = null;
+        _restartCharacterIndex = -1;
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void StartInitialSceneTest()
     {
@@ -63,7 +76,7 @@ public class RunSceneTestBootstrap : MonoBehaviour
         {
             RunSceneTestBootstrap candidate = root.GetComponent<RunSceneTestBootstrap>();
 
-            if (candidate == null || !candidate.isActiveAndEnabled || !candidate._autoStartInEditor)
+            if (candidate == null || !candidate.isActiveAndEnabled || !candidate.ShouldAutoStart)
                 continue;
 
             if (bootstrap != null)
@@ -77,6 +90,20 @@ public class RunSceneTestBootstrap : MonoBehaviour
             return;
 
         bootstrap.StartCoroutine(bootstrap.BeginRunWhenReady());
+    }
+
+    void Start()
+    {
+        if (!ShouldAutoStart || transform.parent != null || _restartScenePath != gameObject.scene.path)
+            return;
+
+        int characterIndex = _restartCharacterIndex;
+
+        // 재로드 요청을 한 번만 소비
+        ResetCharacterSwitchState();
+
+        _testCharacterIndex = characterIndex;
+        StartCoroutine(BeginRunWhenReady());
     }
 
     IEnumerator BeginRunWhenReady()
@@ -121,7 +148,7 @@ public class RunSceneTestBootstrap : MonoBehaviour
 
         RunStartRequest.ValidateDifficulty(_testDifficulty);
 
-        if(_integratedMasteryDefinition == null || _characterMasteryDefinition == null)
+        if (_integratedMasteryDefinition == null || _characterMasteryDefinition == null)
             throw new MissingReferenceException($"{name}: 통합 숙련도와 캐릭터 숙련도 레벨표 연결 필요");
 
         _integratedMasteryDefinition.Validate();
@@ -144,7 +171,7 @@ public class RunSceneTestBootstrap : MonoBehaviour
 
         foreach (TestMetaPurchase purchase in _purchases)
         {
-            purchases.Add(new MetaUpgradeRecord(character.CharacterId, purchase.UpgradeId, purchase.Rank));
+            purchases.Add(new MetaUpgradeRecord(purchase.UpgradeId, purchase.Rank));
         }
 
         // 기존 구매 단계 검증 경로 재사용
@@ -170,5 +197,53 @@ public class RunSceneTestBootstrap : MonoBehaviour
 
         return new RunStartRequest(snapshot, _testDifficulty);
     }
+
+    /// <summary>
+    /// 다음 캐릭터를 선택하여 현재 테스트 씬 재시작
+    /// </summary>
+    public void SwitchToNextCharacter()
+    {
+        if (!Application.isPlaying || !isActiveAndEnabled || !ShouldAutoStart || _restartScenePath != null)
+            return;
+
+        ValidateConfiguration();
+
+        if (!_gameFlow.IsRunning || _gameFlow.IsEndRequested || _characters.Length < 2)
+            return;
+
+        // 정식 씬 흐름과 독립된 테스트 실행만 허용
+        if (FindFirstObjectByType<SceneFlowController>(FindObjectsInactive.Include) != null)
+            throw new InvalidOperationException($"{name}: 테스트 씬을 직접 실행한 상태에서만 캐릭터 변경 가능");
+
+        string scenePath = gameObject.scene.path;
+
+        if (string.IsNullOrEmpty(scenePath))
+            throw new InvalidOperationException($"{name}: 저장된 테스트 씬 필요");
+
+        // Inspector 값 대신 현재 실행 중인 캐릭터를 기준으로 선택
+        CharacterGrowthDefinition currentCharacter = _gameFlow.StartRequest.GrowthSnapshot.GrowthDefinition;
+
+        int currentIndex = Array.IndexOf(_characters, currentCharacter);
+
+        if (currentIndex < 0)
+            throw new InvalidOperationException($"{name}: 현재 캐릭터가 테스트 캐릭터 목록에 없음");
+
+        _restartScenePath = scenePath;
+        _restartCharacterIndex = (currentIndex + 1) % _characters.Length;
+
+        try
+        {
+#if UNITY_EDITOR
+            UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode(scenePath, new LoadSceneParameters(LoadSceneMode.Single));
+#else
+    SceneManager.LoadSceneAsync(scenePath, new LoadSceneParameters(LoadSceneMode.Single));
 #endif
+        }
+        catch
+        {
+            // 재로드 요청 실패 시 다음 요청을 위한 상태 복구
+            ResetCharacterSwitchState();
+            throw;
+        }
+    }
 }

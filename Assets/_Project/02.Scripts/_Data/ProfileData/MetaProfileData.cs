@@ -24,14 +24,11 @@ public class MetaProfileData
     public DailyQuestData DailyQuests { get; set; }
 
     /// <summary>
-    /// 저장 파일의 캐릭터별 강화 구매 항목
+    /// 저장 파일의 계정 공용 강화 구매 항목
     /// </summary>
     [JsonObject(MemberSerialization.OptIn)]
     public class PurchaseData
     {
-        [JsonProperty("characterId", Required = Required.Always)]
-        public string CharacterId { get; set; }
-
         [JsonProperty("upgradeId", Required = Required.Always)]
         public string UpgradeId { get; set; }
 

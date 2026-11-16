@@ -162,7 +162,6 @@ public class LocalMetaProfileStore : IMetaProfileStore
             if (!(item is JObject row))
                 throw new JsonSerializationException("구매 항목은 JSON 객체 필요");
 
-            RequireType(row, "characterId", JTokenType.String);
             RequireType(row, "upgradeId", JTokenType.String);
             RequireType(row, "rank", JTokenType.Integer);
         }
@@ -247,7 +246,7 @@ public class LocalMetaProfileStore : IMetaProfileStore
 
         // 형식 검증 이후 기능별 기본 기록 계약 검증
         foreach (MetaProfileData.PurchaseData row in data.Purchases)
-            _ = new MetaUpgradeRecord(row.CharacterId, row.UpgradeId, row.Rank);
+            _ = new MetaUpgradeRecord(row.UpgradeId, row.Rank);
 
         foreach (MetaProfileData.LoadoutData row in data.Loadouts)
             _ = new MetaLoadoutRecord(row.CharacterId, row.Slots);

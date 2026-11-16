@@ -13,6 +13,8 @@ public sealed class TargetDamageSkillDefinition : SkillDefinition
 {
     [Header("----- 선택적 적중 범위 효과 -----")]
     [SerializeField] AreaEffectDefinition _onHitAreaEffect;
+    [SerializeField] bool _applyDirectDamage = true;
+    [SerializeField] bool _includeDirectTargetInArea;
 
     [Header("----- 장애물 검사 -----")]
     [SerializeField] LayerMask _blockingMask;
@@ -32,6 +34,8 @@ public sealed class TargetDamageSkillDefinition : SkillDefinition
 
     // 적중 시 추가할 범위 효과, 미지정 시 직접 피해만 처리
     public AreaEffectDefinition OnHitAreaEffect => _onHitAreaEffect;
+    public bool AppliesDirectDamage => _onHitAreaEffect == null || _applyDirectDamage;
+    public bool IncludeDirectTargetInArea => _includeDirectTargetInArea;
     public LayerMask BlockingMask => _blockingMask;
     public float DamageMultiplier => _damageMultiplier;
     public float SpellPowerMultiplier => _spellPowerMultiplier;

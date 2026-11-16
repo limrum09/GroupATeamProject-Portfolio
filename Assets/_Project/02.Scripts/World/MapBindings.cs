@@ -33,11 +33,13 @@ public class MapBindings : MonoBehaviour
         [SerializeField] SphereCollider _entryArea;
         [SerializeField] CombatAreaSpawnData _spawnData = new CombatAreaSpawnData();
         [SerializeField] List<SphereCollider> _spawnAreas = new List<SphereCollider>();
+        [SerializeField] GameObject _progressBlocker;
 
         public Transform Root => _root;
         public SphereCollider EntryArea => _entryArea;
         public CombatAreaSpawnData SpawnData => _spawnData;
         public IReadOnlyList<SphereCollider> SpawnAreas => _spawnAreas;
+        public GameObject ProgressBlocker => _progressBlocker;
 
 #if UNITY_EDITOR
         /// <summary>
@@ -79,6 +81,26 @@ public class MapBindings : MonoBehaviour
             _spawnData.AppendWaveForEditor();
             _spawnAreas.Add(spawnArea);
         }
+
+        /// <summary>
+        /// 편집 도구에서 생성한 구역 차단판 등록
+        /// </summary>
+        /// <param name="blocker">해당 구역 하위에 생성한 차단판</param>
+        public void RegisterCreatedBlocker(GameObject blocker)
+        {
+            if (_progressBlocker != null)
+                throw new InvalidOperationException("이미 등록된 차단판 존재");
+
+            if (_root == null || blocker == null ||
+                blocker.transform == _root ||
+                !blocker.transform.IsChildOf(_root) ||
+                blocker.scene != _root.gameObject.scene)
+            {
+                throw new InvalidOperationException("같은 구역 하위의 차단판 연결 필요");
+            }
+
+            _progressBlocker = blocker;
+        }
 #endif
     }
 
@@ -96,6 +118,9 @@ public class MapBindings : MonoBehaviour
     [SerializeField] SphereCollider _spawnAreaPrefab;
     [SerializeField, Min(0)] int _editAreaIndex;
 
+    [Header("----- 차단판 생성 도구 -----")]
+    [SerializeField] GameObject _progressBlockerPrefab;
+
     [Header("----- 포탈 배치 도구 -----")]
     [SerializeField] WorldPortal _portalPrefab;
     [SerializeField] SessionProgressManager _portalProgress;
@@ -107,6 +132,7 @@ public class MapBindings : MonoBehaviour
     public EnemyWorldType WorldType => _worldType;
     public Transform PlayerEntry => _playerEntry;
     public Transform ShopPoint => _shopPoint;
+    public WorldPortal Portal => _portal;
     public IReadOnlyList<CombatAreaBinding> CombatAreas => _combatAreas;
 
 #if UNITY_EDITOR
@@ -234,6 +260,55 @@ public class MapBindings : MonoBehaviour
         catch
         {
             // 부모·구역 생성과 참조 등록을 한 번에 복구
+            Undo.RevertAllDownToGroup(group);
+            throw;
+        }
+    }
+
+    [ContextMenu("전투 구역/지정 구역에 차단판 생성")]
+    void CreateProgressBlocker()
+    {
+        if (Application.isPlaying || EditorUtility.IsPersistent(this))
+            throw new InvalidOperationException("씬 맵의 편집 모드에서만 차단판 생성 가능");
+
+        if (_progressBlockerPrefab == null ||
+            !PrefabUtility.IsPartOfPrefabAsset(_progressBlockerPrefab))
+        {
+            throw new MissingReferenceException("차단판 프리팹 연결 필요");
+        }
+
+        CombatAreaBinding area = GetCombatArea(_editAreaIndex);
+        if (area.ProgressBlocker != null)
+            throw new InvalidOperationException("해당 구역에 이미 차단판 존재");
+
+        Undo.IncrementCurrentGroup();
+        int group = Undo.GetCurrentGroup();
+        Undo.SetCurrentGroupName("전투 구역 차단판 생성");
+
+        try
+        {
+            GameObject blocker = (GameObject)PrefabUtility.InstantiatePrefab(
+                _progressBlockerPrefab, area.Root);
+            Undo.RegisterCreatedObjectUndo(blocker, "차단판 프리팹 생성");
+
+            blocker.name = GameObjectUtility.GetUniqueNameForSibling(
+                area.Root, "ProgressBlocker");
+            blocker.transform.localPosition = Vector3.zero;
+            blocker.transform.localRotation = Quaternion.identity;
+
+            Undo.RecordObject(this, "구역 차단판 등록");
+            area.RegisterCreatedBlocker(blocker);
+
+            EditorUtility.SetDirty(this);
+            if (PrefabUtility.IsPartOfPrefabInstance(this))
+                PrefabUtility.RecordPrefabInstancePropertyModifications(this);
+
+            Selection.activeGameObject = blocker;
+            Undo.CollapseUndoOperations(group);
+        }
+        catch
+        {
+            // 프리팹 생성과 구역 참조 등록의 일괄 복구
             Undo.RevertAllDownToGroup(group);
             throw;
         }

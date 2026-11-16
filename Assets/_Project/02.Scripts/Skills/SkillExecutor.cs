@@ -12,6 +12,11 @@ internal static class SkillExecutor
 
         SkillAimResolver.ValidateDefinition(definition);
 
+        float moveLockDuration = definition.PostCastMoveLockDuration;
+
+        if (float.IsNaN(moveLockDuration) || float.IsInfinity(moveLockDuration) || moveLockDuration < 0f)
+            throw new InvalidOperationException($"{definition.name}: 발동 후 이동 제한 시간은 유한한 0 이상의 값 필요");
+
         if (definition is AreaDamageSkillDefinition area)
         {
             if (area.AreaEffect == null)
@@ -267,26 +272,33 @@ internal static class SkillExecutor
             return;
 
         AreaEffectDefinition effect = definition.OnHitAreaEffect;
-
         CombatTarget[] initialTargets = null;
+        Guid? excludedTargetId = null;
         float areaPower = 0f;
 
         if (effect != null)
         {
             areaPower = SkillDamageResolver.CalculatePower(execution, effect.DamageMultiplier, effect.SpellPowerMultiplier);
 
-            // 즉시 범위 타격에만 직접 피해 이전 검색 결과 사용
+            // 직격으로 대상이 사망하거나 풀에 반환되기 전의 식별값 보관
+            if (!definition.IncludeDirectTargetInArea)
+                excludedTargetId = target.Source.Id;
+
+            // 즉시 회차는 직격 피해 적용 전의 범위 검색 결과 사용
             if (effect.HasImmediatePulse)
                 initialTargets = CombatHitQuery.FindTargets(execution.Source, splashOrigin, rotation, Vector3.zero, effect.Hitbox, effect.TargetMask, effect.BlockingMask);
         }
 
-        if (!SkillDamageResolver.TryApply(execution, target, power, impactPosition, rotation, true))
-            return;
+        if (definition.AppliesDirectDamage)
+        {
+            if (!SkillDamageResolver.TryApply(execution, target, power, impactPosition, rotation, true))
+                return;
+        }
 
         if (effect == null)
             return;
 
-        AreaEffectExecutor.Execute(execution, effect,splashOrigin, rotation, areaPower, initialTargets, initialExcludedTarget: effect.HasImmediatePulse ? target : null);
+        AreaEffectExecutor.Execute(execution, effect, splashOrigin, rotation, areaPower, initialTargets, excludedTargetId: excludedTargetId);
     }
 
     internal static bool TryResolveRequestedAreaPosition(AreaDamageSkillDefinition definition, Vector3 casterPosition, SkillAimRequest request, out Vector3 position)

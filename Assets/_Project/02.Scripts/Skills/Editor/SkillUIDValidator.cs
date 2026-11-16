@@ -8,60 +8,116 @@ using UnityEngine;
 /// </summary>
 public static class SkillUIDValidator
 {
+    public const string SearchRoot = "Assets/_Project";
+
+    /// <summary>
+    /// 문제가 있는 스킬과 UID 검사 메시지
+    /// </summary>
+    public readonly struct Issue
+    {
+        public SkillDefinition Definition { get; }
+        public string Message { get; }
+
+        /// <summary>
+        /// UID 검사 결과 생성
+        /// </summary>
+        /// <param name="definition">문제가 있는 스킬</param>
+        /// <param name="message">오류 설명</param>
+        public Issue(SkillDefinition definition, string message)
+        {
+            Definition = definition;
+            Message = message;
+        }
+    }
+
     [MenuItem("Tools/Skills/Validate UIDs")]
     static void ValidateAll()
     {
-        Dictionary<string, string> registered = new Dictionary<string, string>(StringComparer.Ordinal);
+        List<SkillDefinition> definitions = FindDefinitions();
+        List<Issue> issues = Validate(definitions);
 
-        string[] assetGuids = AssetDatabase.FindAssets("t:ScriptableObject", new[] { "Assets/_Project" });
+        foreach (Issue issue in issues)
+            Debug.LogError(issue.Message, issue.Definition);
 
-        int errorCount = 0;
-        int skillCount = 0;
+        if (issues.Count == 0)
+            Debug.Log($"스킬 UID 검사 완료: {definitions.Count}개");
+        else
+            Debug.LogError($"스킬 UID 검사 실패: {issues.Count}개 오류");
+    }
 
-        foreach (string assetGuid in assetGuids)
+    /// <summary>
+    /// 프로젝트 소유 스킬 에셋과 하위 에셋 조회
+    /// </summary>
+    /// <returns>경로와 이름으로 정렬한 스킬 목록</returns>
+    public static List<SkillDefinition> FindDefinitions()
+    {
+        List<SkillDefinition> definitions = new List<SkillDefinition>();
+
+        string[] guids = AssetDatabase.FindAssets("t:ScriptableObject", new[] { SearchRoot });
+
+        foreach (string guid in guids)
         {
-            string path = AssetDatabase.GUIDToAssetPath(assetGuid);
+            string path = AssetDatabase.GUIDToAssetPath(guid);
 
             foreach (UnityEngine.Object asset in AssetDatabase.LoadAllAssetsAtPath(path))
             {
-                if (!(asset is SkillDefinition definition))
-                    continue;
-
-                skillCount++;
-
-                try
-                {
-                    definition.ValidateSkillUID();
-                }
-                catch (InvalidOperationException exception)
-                {
-                    Debug.LogError($"{path}: {exception.Message}", definition);
-
-                    errorCount++;
-                    continue;
-                }
-
-                string location = $"{path} ({definition.name})";
-
-                if (registered.TryGetValue(definition.SkillUID, out string existingLocation))
-                {
-                    Debug.LogError($"중복 스킬 UID: {definition.SkillUID}\n" + $"{existingLocation}\n{location}", definition);
-
-                    errorCount++;
-                    continue;
-                }
-
-                registered.Add(definition.SkillUID, location);
+                if (asset is SkillDefinition definition)
+                    definitions.Add(definition);
             }
         }
 
-        if (errorCount == 0)
+        definitions.Sort((left, right) =>
         {
-            Debug.Log($"스킬 UID 검사 완료: {skillCount}개");
-        }
-        else
+            int pathOrder = StringComparer.Ordinal.Compare(AssetDatabase.GetAssetPath(left), AssetDatabase.GetAssetPath(right));
+
+            return pathOrder != 0 ? pathOrder : StringComparer.Ordinal.Compare(left.name, right.name);
+        });
+
+        return definitions;
+    }
+
+    /// <summary>
+    /// 빈 UID와 중복 UID 검사
+    /// </summary>
+    /// <param name="definitions">검사할 전체 스킬 목록</param>
+    /// <returns>문제가 있는 스킬과 오류 설명</returns>
+    public static List<Issue> Validate(IReadOnlyList<SkillDefinition> definitions)
+    {
+        if (definitions == null)
+            throw new ArgumentNullException(nameof(definitions));
+
+        List<Issue> issues = new List<Issue>();
+        Dictionary<string, string> registered = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (SkillDefinition definition in definitions)
         {
-            Debug.LogError($"스킬 UID 검사 실패: {errorCount}개 오류");
+            // 에디터에서 삭제된 목록 항목 제외
+            if (definition == null)
+                continue;
+
+            string location = $"{AssetDatabase.GetAssetPath(definition)} ({definition.name})";
+
+            try
+            {
+                definition.ValidateSkillUID();
+            }
+            catch (InvalidOperationException exception)
+            {
+                issues.Add(new Issue(definition, $"{location}\n{exception.Message}"));
+
+                continue;
+            }
+
+            if (registered.TryGetValue(definition.SkillUID, out string existing))
+            {
+                issues.Add(new Issue(definition, $"중복 UID: {definition.SkillUID}\n{existing}\n{location}"));
+
+                continue;
+            }
+
+            registered.Add(definition.SkillUID, location);
         }
+
+        return issues;
     }
 }

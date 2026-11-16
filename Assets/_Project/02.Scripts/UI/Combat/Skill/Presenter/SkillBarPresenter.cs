@@ -147,9 +147,6 @@ public sealed class SkillBarPresenter : IDisposable
         {
             SkillInstance skill = _loadout.GetSkill(i);
 
-            if (skill != null && string.IsNullOrWhiteSpace(skill.Definition.SkillName))
-                throw new InvalidOperationException($"{skill.Definition.name}: Skill Name 입력 필요");
-
             _view.ShowSlot(i, _hotkeys[i], skill != null ? skill.Definition.SkillIcon : null);
         }
 

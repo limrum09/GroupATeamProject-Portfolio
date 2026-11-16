@@ -32,6 +32,10 @@ public class SessionUIController : MonoBehaviour
     [Header("----- 플레이어 체력 -----")]
     [SerializeField] PlayerHealthUIController _playerHealth;
 
+    [Header("----- 전투 구역 표시 -----")]
+    [Tooltip("발밑 링을 구성하지 않은 독립 테스트 씬에서는 생략 가능")]
+    [SerializeField] CombatantRingUIController _combatantRings;
+
     InputAction _openMapAction;
     bool _bound;
     bool _shopPresentationActive;
@@ -54,7 +58,8 @@ public class SessionUIController : MonoBehaviour
             (_runClear != null && HasVisibleCanvas(_runClear)))
             return;
 
-        _worldGraph.Open();
+        if (!_worldGraph.TryHandleCancel())
+            _worldGraph.Open();
     }
 
     static bool HasVisibleCanvas(Component controller)
@@ -147,7 +152,8 @@ public class SessionUIController : MonoBehaviour
     /// <param name="progression">프로필의 런 성장 상태, 프로필 화면이 없으면 생략 가능</param>
     /// <param name="playerStatus">체력 화면의 전투 상태, 해당 화면이 없으면 생략 가능</param>
     /// <param name="economy">스킬 HUD의 유료 강화에 사용할 세션 지갑</param>
-    public void Bind(SessionProgressManager world, SessionShop shop, SessionShopPurchaseService purchases, SkillLoadout loadout = null, PlayerDefinition playerDefinition = null, RunLevelProgression progression = null, CharacterStatus playerStatus = null, SessionEconomyManager economy = null)
+    /// <param name="player">발밑 링 표시 대상, 해당 기능이 없으면 생략 가능</param>
+    public void Bind(SessionProgressManager world, SessionShop shop, SessionShopPurchaseService purchases, SkillLoadout loadout = null, PlayerDefinition playerDefinition = null, RunLevelProgression progression = null, CharacterStatus playerStatus = null, SessionEconomyManager economy = null, PlayerActor player = null)
     {
         ValidateReferences();
 
@@ -183,7 +189,7 @@ public class SessionUIController : MonoBehaviour
 
         try
         {
-            _worldGraph.Bind(world);
+            _worldGraph.Bind(world, loadout);
             _shop.Bind(shop, purchases);
 
             if (_nextWorld != null)
@@ -201,6 +207,8 @@ public class SessionUIController : MonoBehaviour
             if (_playerHealth != null)
                 _playerHealth.Bind(playerStatus);
 
+            if (_combatantRings != null)
+                _combatantRings.Bind(player);
 
             _shop.OnOpening += HandleShopOpening;
             _shop.OnClosed += HandleShopClosed;
@@ -230,6 +238,9 @@ public class SessionUIController : MonoBehaviour
 
         _bound = false;
         List<Exception> errors = new List<Exception>();
+
+        if (_combatantRings != null)
+            TryCleanup(_combatantRings.Unbind, errors);
 
         // 상점 문맥 종료 전에 UI의 복구 콜백 해제
         if (_shop != null)

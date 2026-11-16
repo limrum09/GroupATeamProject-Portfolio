@@ -130,7 +130,6 @@ public static class FirestoreMetaProfileData
             Purchases = ReadRows(fields, "purchases",
                 row => new MetaProfileData.PurchaseData
                 {
-                    CharacterId = ReadField<string>(row, "characterId"),
                     UpgradeId = ReadField<string>(row, "upgradeId"),
                     Rank = checked((int)ReadField<long>(row, "rank"))
                 }),

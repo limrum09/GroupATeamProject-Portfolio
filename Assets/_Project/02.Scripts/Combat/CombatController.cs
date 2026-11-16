@@ -34,6 +34,7 @@ public sealed class CombatController : MonoBehaviour
     double _actionStartedAt;
     double _finishAt;
     double _nextAttackAt;
+    double _postCastMoveLockUntil;
     bool _actionHasWorldPosition;
     bool _movementExecuting;
 
@@ -60,10 +61,12 @@ public sealed class CombatController : MonoBehaviour
     public bool IsCasting => _action == CombatActionKind.Skill;    
     // 현재 시전 중인 FollowCaster 스킬의 일반 이동 허용 여부
     bool AllowsMovementDuringCast => IsCasting && _castingSkill.Definition is AreaDamageSkillDefinition area && area.TrackingMode == AreaTrackingMode.FollowCaster;
-    // 현재 전투 행동에서 일반 이동을 계속할 수 있는지 여부
-    public bool CanMove => isActiveAndEnabled && _owner.IsAlive && (!IsBusy || AllowsMovementDuringCast);
-    // 기본 공격 취소를 포함한 일반 이동 요청의 허용 여부
-    public bool CanRequestMovement => isActiveAndEnabled && _owner.IsAlive && (!IsCasting || AllowsMovementDuringCast);
+    // 게임 시간 기준의 발동 후 이동 제한 여부
+    bool IsPostCastMoveLocked => Time.timeAsDouble < _postCastMoveLockUntil;
+    // 전투 행동과 발동 후 이동 제한을 반영한 일반 이동 허용 여부
+    public bool CanMove => isActiveAndEnabled && _owner.IsAlive && !IsPostCastMoveLocked && (!IsBusy || AllowsMovementDuringCast);
+    // 기본 공격 취소와 발동 후 이동 제한을 반영한 이동 요청 허용 여부
+    public bool CanRequestMovement => isActiveAndEnabled && _owner.IsAlive && !IsPostCastMoveLocked && (!IsCasting || AllowsMovementDuringCast);
 
     public CombatActionInfo CurrentAction
     {
@@ -114,11 +117,18 @@ public sealed class CombatController : MonoBehaviour
         if (_owner != null && _owner.Status != null)
             _owner.Status.OnDied -= HandleOwnerDied;
 
+        _postCastMoveLockUntil = 0d;
         CancelAction();
     }
 
     void Update()
     {
+        if (_postCastMoveLockUntil > 0d && Time.timeAsDouble >= _postCastMoveLockUntil)
+        {
+            _postCastMoveLockUntil = 0d;
+            OnActionChanged?.Invoke();
+        }
+
         if (!IsBusy || Time.timeScale <= 0f)
             return;
 
@@ -165,6 +175,7 @@ public sealed class CombatController : MonoBehaviour
 
     void HandleOwnerDied()
     {
+        _postCastMoveLockUntil = 0d;
         CancelAction();
     }
 
@@ -210,6 +221,14 @@ public sealed class CombatController : MonoBehaviour
         }
 
         ResetActionState();
+
+        if (skill != null && skill.Definition.PostCastMoveLockDuration > 0f)
+        {
+            double lockUntil = Time.timeAsDouble + skill.Definition.PostCastMoveLockDuration;
+
+            // 기존 잠금을 단축하지 않고 더 늦은 종료 시각 적용
+            _postCastMoveLockUntil = Math.Max(_postCastMoveLockUntil, lockUntil);
+        }
 
         OnExecutionCreated?.Invoke(execution);
 
@@ -449,6 +468,7 @@ public sealed class CombatController : MonoBehaviour
         _movementSkill = movementSkill;
 
         _nextAttackAt = 0d;
+        _postCastMoveLockUntil = 0d;
         _fixedSkillsRunId = runId;
     }
 
@@ -579,6 +599,9 @@ public sealed class CombatController : MonoBehaviour
     public bool TryUseMovementSkill(Vector3 requestedDirection)
     {
         if (!isActiveAndEnabled || !_owner.IsAlive || IsCasting || Time.timeScale <= 0f)
+            return false;
+
+        if (IsPostCastMoveLocked)
             return false;
 
         if (_movementSkill == null || !_movementSkill.IsReady)

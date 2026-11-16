@@ -21,7 +21,6 @@ public class MetaUpgradePresenter : IDisposable
     string _dragUpgradeId;
 
     int _selectedIndex = -1;
-    int _selectedSlot = -1;
     int _shownRank;
     int _dragSourceSlot = -1;
     int _hiddenDuringSave = -1;
@@ -90,6 +89,10 @@ public class MetaUpgradePresenter : IDisposable
         if (_characterId != characterId)
         {
             _characterId = characterId;
+
+            PlayerDefinition player = (PlayerDefinition)_lobby.SelectedCharacter.GrowthDefinition.CharacterDefinition;
+            _view.ShowLoadoutLayout(player.Class);
+
             _upgrades = _lobby.GetUpgrades();
 
             // 로딩된 데이터와 고정 UI 목록의 최초 연결 확인
@@ -97,14 +100,14 @@ public class MetaUpgradePresenter : IDisposable
                 throw new InvalidOperationException("활성 메타 강화 수와 오른쪽 UI 항목 수 일치 필요");
 
             _selectedIndex = -1;
-            _selectedSlot = -1;
         }
 
         _slots = _lobby.GetEquippedUpgradeIds();
 
         _view.ShowHeader(_lobby.SelectedCharacter.DisplayName, _lobby.MetaBalance);
         _lobby.GetSelectedCharacterMasteryProgress(out int characterLevel, out long currentExperience, out long requiredExperience);
-        _view.ShowMastery(_lobby.IntegratedMasteryLevel, characterLevel, currentExperience, requiredExperience);
+        int integratedLevel = _lobby.IntegratedMasteryLevel;
+        _view.ShowMastery(integratedLevel, characterLevel, currentExperience, requiredExperience);
 
         for (int i = 0; i < _upgrades.Count; i++)
         {
@@ -115,36 +118,64 @@ public class MetaUpgradePresenter : IDisposable
             if (_dragging && _dragSourceSlot >= 0 && upgrade.UpgradeId == _dragUpgradeId)
                 equipped = false;
 
-            _view.ShowCatalog(i, $"{rank}/{upgrade.MaxRank}", equipped, i == _selectedIndex);
+            int lockedUntilLevel = upgrade.IsUnlockedAt(integratedLevel) ? 0 : upgrade.RequiredIntegratedLevel;
+
+            _view.ShowCatalog(i, upgrade.UpgradeId, $"{rank}/{upgrade.MaxRank}", equipped, i == _selectedIndex, lockedUntilLevel);
         }
 
         for (int i = 0; i < _slots.Count; i++)
         {
-            bool hidden = (_dragging && i == _dragSourceSlot) || (_busy && i == _hiddenDuringSave);
+            bool hideIcon = (_dragging && i == _dragSourceSlot) || (_busy && i == _hiddenDuringSave);
 
-            _view.ShowSlot(i, hidden ? -1 : FindCatalog(_slots[i]), i == _selectedSlot);
+            int unlockLevel = _lobby.SelectedCharacter.GrowthDefinition.GetSlotUnlockLevel(i);
+            _view.ShowSlot(i, FindCatalog(_slots[i]), _lobby.IsEquipSlotUnlocked(i), hideIcon, unlockLevel);
         }
 
         bool pendingSave = _lobby.HasPendingMetaSave;
         bool canPurchase = false;
-        string purchaseLabel = _lobby.HasMetaOperationFault ? "사용 불가" : _busy || _lobby.IsMetaProcessing ? "처리 중" : pendingSave ? "저장 재시도" : "강화";
+        bool levelLocked = false;
+        string restriction = _lobby.MetaSaveError ?? string.Empty;
+
+        string purchaseLabel = _lobby.HasMetaOperationFault ? "사용 불가"
+            : _busy || _lobby.IsMetaProcessing ? "처리 중"
+            : pendingSave ? "저장 재시도"
+            : "강화";
 
         if (_selectedIndex < 0)
         {
-            _view.ShowDetails(-1, string.Empty, string.Empty, "오른쪽에서 강화를 선택하세요.", "—");
+            _view.ShowDetails(string.Empty, string.Empty, "오른쪽에서 강화를 선택하세요.", "—");
         }
         else
         {
             MetaUpgradeData selected = _upgrades[_selectedIndex];
             _shownRank = _lobby.GetPurchasedRank(selected.UpgradeId);
-
-            bool hasNext = _lobby.TryGetNextRank(selected.UpgradeId, out MetaUpgradeRankData nextRank);
+            levelLocked = !selected.IsUnlockedAt(integratedLevel);
 
             string description = FormatDescription(selected, _shownRank);
-            string price = pendingSave ? "—" : hasNext ? nextRank.Cost.ToString("N0") : "최대 단계";
+            string price;
 
-            _view.ShowDetails(_selectedIndex, selected.DisplayName, $"{_shownRank}/{selected.MaxRank}", description, price);
+            if (pendingSave)
+            {
+                price = "—";
+            }
+            else if (_shownRank < selected.MaxRank)
+            {
+                // 레벨이 잠겨 있어도 다음 단계의 실제 비용 표시
+                price = selected.GetRank(_shownRank + 1).Cost.ToString("N0");
+            }
+            else
+            {
+                price = "최대 단계";
+            }
 
+            if (levelLocked && !pendingSave && string.IsNullOrEmpty(restriction))
+            {
+                restriction = $"통합 숙련도 Lv.{selected.RequiredIntegratedLevel}에 도달해야 합니다.";
+            }
+
+            _view.ShowDetails(selected.DisplayName, $"{_shownRank}/{selected.MaxRank}", description, price);
+
+            bool hasNext = _lobby.TryGetNextRank(selected.UpgradeId, out MetaUpgradeRankData nextRank);
             canPurchase = CanChange && hasNext && _lobby.MetaBalance >= nextRank.Cost;
         }
 
@@ -154,11 +185,8 @@ public class MetaUpgradePresenter : IDisposable
         }
 
         bool canInspect = !_busy && !_dragging && !_lobby.IsMetaProcessing;
-
-        _view.SetInteraction(canInspect, canPurchase, CanClose, purchaseLabel);
-
-        // 현재 적용 중인 레벨 또는 해금 제한 없음
-        _view.ShowRestriction(_lobby.MetaSaveError ?? string.Empty);
+        _view.SetInteraction(canInspect, canPurchase, CanClose, purchaseLabel, levelLocked && !pendingSave);
+        _view.ShowRestriction(restriction);
     }
 
     void HandleClicked(bool fromLoadout, int index, bool doubleClick)
@@ -169,7 +197,6 @@ public class MetaUpgradePresenter : IDisposable
         string upgradeId = fromLoadout ? _slots[index] : _upgrades[index].UpgradeId;
 
         _selectedIndex = FindCatalog(upgradeId);
-        _selectedSlot = fromLoadout ? index : -1;
 
         Refresh();
 
@@ -188,7 +215,8 @@ public class MetaUpgradePresenter : IDisposable
 
         for (int slot = 0; slot < _slots.Count; slot++)
         {
-            if (_slots[slot] != null) continue;
+            if (_slots[slot] != null || !_lobby.IsEquipSlotUnlocked(slot))
+                continue;
 
             int destination = slot;
 
@@ -217,7 +245,6 @@ public class MetaUpgradePresenter : IDisposable
         }
 
         _selectedIndex = FindCatalog(upgradeId);
-        _selectedSlot = fromLoadout ? index : -1;
 
         if (_lobby.GetPurchasedRank(upgradeId) == 0 || (!fromLoadout && FindEquipped(upgradeId) >= 0))
         {
@@ -428,6 +455,7 @@ public class MetaUpgradePresenter : IDisposable
             MetaEquipStatus.StaleSelection => "슬롯 정보가 변경되었습니다. 다시 시도해 주세요.",
             MetaEquipStatus.Busy => "진행 중인 작업이 끝난 뒤 다시 시도해 주세요.",
             MetaEquipStatus.NotAllowed => "현재는 장착 정보를 변경할 수 없습니다.",
+            MetaEquipStatus.SlotLocked => "캐릭터 숙련도 레벨이 부족해 잠긴 슬롯입니다.",
             _ => "장착 정보를 처리하지 못했습니다."
         };
     }

@@ -22,6 +22,9 @@ public class DamageTextController : MonoBehaviour
     [Header("----- 숫자 프리팹 -----")]
     [SerializeField] DamageTextView _viewPrefab;
 
+    [Header("----- 동시 타격 숫자 간격 -----")]
+    [SerializeField, Min(1f)] float _enemyHitStackSpacing = 56f;
+
     [Header("----- 적 피해 색상 -----")]
     [SerializeField] Color _enemyNormalColor = Color.white;
     [SerializeField] Color _enemyCriticalColor = new Color(1f, 0.75f, 0.15f);
@@ -46,12 +49,15 @@ public class DamageTextController : MonoBehaviour
         public Action<DamageRequest, float> Damaged;
         public Action<float> Healed;
         public CharacterStatus Status;
+        public int HitStackFrame = -1;
+        public int HitStackCount;
     }
 
     struct ActiveText
     {
         public DamageTextView View;
         public Vector3 WorldPosition;
+        public float StackOffset;
     }
 
     readonly Dictionary<CombatTarget, DamageBinding> _bindings = new Dictionary<CombatTarget, DamageBinding>();
@@ -93,6 +99,9 @@ public class DamageTextController : MonoBehaviour
 
     void ValidateConfiguration()
     {
+        if (float.IsNaN(_enemyHitStackSpacing) || float.IsInfinity(_enemyHitStackSpacing) || _enemyHitStackSpacing < 1f)
+            throw new InvalidOperationException($"{name}: 타격 숫자의 세로 간격은 유한한 1 이상의 값 필요");
+
         if (_spawnManager == null || _worldCamera == null || _canvas == null || _root == null ||
             _player == null || _playerDamageAnchor == null || _viewPrefab == null)
         {
@@ -175,7 +184,7 @@ public class DamageTextController : MonoBehaviour
     void HandleDamaged(DamageBinding binding, DamageRequest request, float applied)
     {
         Color color = request.IsCritical ? binding.CriticalColor : binding.NormalColor;
-        ShowNumber(binding, applied, request.IsCritical, color);
+        ShowNumber(binding, applied, request.IsCritical, color, true);
     }
 
     bool CanShow(CombatTeam team)
@@ -188,7 +197,7 @@ public class DamageTextController : MonoBehaviour
         };
     }
 
-    void ShowNumber(DamageBinding binding, float amount, bool isCritical, Color color)
+    void ShowNumber(DamageBinding binding, float amount, bool isCritical, Color color, bool stackEnemyHits = false)
     {
         if (amount <= 0f || !CanShow(binding.Target.Team)) return;
 
@@ -204,16 +213,32 @@ public class DamageTextController : MonoBehaviour
             : Instantiate(_viewPrefab, _root, false);
 
         float horizontalDirection = GetHorizontalDirection(binding);
+        float stackOffset = stackEnemyHits && binding.Target.Team == CombatTeam.Enemy
+            ? GetEnemyHitStackOffset(binding)
+            : 0f;
         view.Begin(amount, isCritical, color, horizontalDirection);
-        view.SetPresentation(position, true);
+        view.SetPresentation(position + Vector2.up * stackOffset, true);
         view.gameObject.SetActive(true);
         view.transform.SetAsLastSibling();
 
         _active.Add(new ActiveText
         {
             View = view,
-            WorldPosition = worldPosition
+            WorldPosition = worldPosition,
+            StackOffset = stackOffset
         });
+    }
+
+    float GetEnemyHitStackOffset(DamageBinding binding)
+    {
+        // 같은 프레임에 같은 적에게 표시하는 타격 숫자를 위로 쌓음
+        if (binding.HitStackFrame != Time.frameCount)
+        {
+            binding.HitStackFrame = Time.frameCount;
+            binding.HitStackCount = 0;
+        }
+
+        return binding.HitStackCount++ * _enemyHitStackSpacing;
     }
 
     float GetHorizontalDirection(DamageBinding binding)
@@ -267,7 +292,7 @@ public class DamageTextController : MonoBehaviour
             }
 
             bool visible = TryGetPosition(active.WorldPosition, out Vector2 position);
-            active.View.SetPresentation(position, visible);
+            active.View.SetPresentation(position + Vector2.up * active.StackOffset, visible);
         }
     }
 

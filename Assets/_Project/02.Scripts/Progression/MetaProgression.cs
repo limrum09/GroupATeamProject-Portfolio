@@ -10,7 +10,7 @@ public class MetaProgression
     readonly Dictionary<string, MetaUpgradeData> _upgrades = new Dictionary<string, MetaUpgradeData>(StringComparer.Ordinal);
     Dictionary<string, MetaLoadoutRecord> _loadouts = new Dictionary<string, MetaLoadoutRecord>(StringComparer.Ordinal);
     Dictionary<string, long> _masteryExperience = new Dictionary<string, long>(StringComparer.Ordinal);
-    Dictionary<(string CharacterId, string UpgradeId), int> _purchasedRanks = new Dictionary<(string CharacterId, string UpgradeId), int>();
+    Dictionary<string, int> _purchasedRanks = new Dictionary<string, int>(StringComparer.Ordinal);
 
     readonly MasteryLevelDefinition _integratedMasteryDefinition;
     readonly MasteryLevelDefinition _characterMasteryDefinition;
@@ -138,10 +138,8 @@ public class MetaProgression
         return character;
     }
 
-    MetaUpgradeData GetUpgrade(string characterId, string upgradeId)
+    MetaUpgradeData GetUpgrade(string upgradeId)
     {
-        GetCharacter(characterId);
-
         if (string.IsNullOrWhiteSpace(upgradeId))
             throw new ArgumentException("강화 식별자 필요", nameof(upgradeId));
 
@@ -149,6 +147,13 @@ public class MetaProgression
             throw new InvalidOperationException($"등록되지 않은 강화 ID: {upgradeId}");
 
         return upgrade;
+    }
+
+    MetaUpgradeData GetUpgrade(string characterId, string upgradeId)
+    {
+        GetCharacter(characterId);
+
+        return GetUpgrade(upgradeId);
     }
 
     /// <summary>
@@ -240,7 +245,7 @@ public class MetaProgression
         if (nextRank.Rank - 1 != expectedRank)
             return false;
 
-        _purchasedRanks[(characterId, upgradeId)] = nextRank.Rank;
+        _purchasedRanks[upgradeId] = nextRank.Rank;
 
         // 재화 차감과 강화 적용 완료 후 거래 조정자에서 변경 알림
         return true;
@@ -271,6 +276,9 @@ public class MetaProgression
 
         if (string.Equals(current[slotIndex], upgradeId, StringComparison.Ordinal))
             return MetaEquipStatus.Unchanged;
+
+        if (upgradeId != null && !IsEquipSlotUnlocked(characterId, slotIndex))
+            return MetaEquipStatus.SlotLocked;
 
         List<string> slots = new List<string>(current);
         slots[slotIndex] = upgradeId;
@@ -305,6 +313,9 @@ public class MetaProgression
 
         if (sourceSlot == destinationSlot)
             return MetaEquipStatus.Unchanged;
+
+        if (!IsEquipSlotUnlocked(characterId, sourceSlot) || !IsEquipSlotUnlocked(characterId, destinationSlot))
+            return MetaEquipStatus.SlotLocked;
 
         List<string> slots = new List<string>(current);
 
@@ -345,12 +356,10 @@ public class MetaProgression
         if (currentRank != previousRank + 1)
             throw new InvalidOperationException("직전 거래에서 증가한 구매 단계만 복구 가능");
 
-        (string CharacterId, string UpgradeId) key = (characterId, upgradeId);
-
         if (previousRank == 0)
-            _purchasedRanks.Remove(key);
+            _purchasedRanks.Remove(upgradeId);
         else
-            _purchasedRanks[key] = previousRank;
+            _purchasedRanks[upgradeId] = previousRank;
     }
 
     /// <summary>
@@ -401,7 +410,7 @@ public class MetaProgression
         if (!AppliesTo(upgrade, characterId))
             throw new InvalidOperationException($"해당 캐릭터에 적용할 수 없는 강화: {characterId}/{upgradeId}");
 
-        if (_purchasedRanks.TryGetValue((characterId, upgradeId), out int rank))
+        if (_purchasedRanks.TryGetValue(upgradeId, out int rank))
             return rank;
 
         return 0;
@@ -440,6 +449,20 @@ public class MetaProgression
         long totalExperience = GetMasteryExperience(characterId);
 
         _characterMasteryDefinition.GetProgress(totalExperience, out level, out currentExperience, out requiredExperience);
+    }
+
+    /// <summary>
+    /// 캐릭터 숙련도에 따른 메타 장착 슬롯 해금 여부 조회
+    /// </summary>
+    /// <param name="characterId">대상 캐릭터 식별자</param>
+    /// <param name="slot">0부터 시작하는 장착 슬롯 번호</param>
+    /// <returns>슬롯 해금 여부</returns>
+    public bool IsEquipSlotUnlocked(string characterId, int slot)
+    {
+        CharacterGrowthDefinition character = GetCharacter(characterId);
+        GetCharacterMasteryProgress(characterId, out int level, out _, out _);
+
+        return level >= character.GetSlotUnlockLevel(slot);
     }
 
     /// <summary>
@@ -574,7 +597,7 @@ public class MetaProgression
 
         MetaUpgradeData upgrade = GetUpgrade(characterId, upgradeId);
 
-        if (!upgrade.Enabled || !AppliesTo(upgrade, characterId))
+        if (!upgrade.Enabled || !AppliesTo(upgrade, characterId) || !upgrade.IsUnlockedAt(IntegratedMasteryLevel))
             return false;
 
         int currentRank = GetPurchasedRank(characterId, upgradeId);
@@ -598,9 +621,13 @@ public class MetaProgression
         CharacterStatValues permanentBonus = default;
         CharacterStatValues perLevelBonus = default;
 
-        foreach (string upgradeId in _loadouts[characterId].Slots)
+        IReadOnlyList<string> slots = _loadouts[characterId].Slots;
+
+        for (int slot = 0; slot < slots.Count; slot++)
         {
-            if (upgradeId == null)
+            string upgradeId = slots[slot];
+
+            if (upgradeId == null || !IsEquipSlotUnlocked(characterId, slot))
                 continue;
 
             MetaUpgradeData upgrade = GetUpgrade(characterId, upgradeId);
@@ -619,58 +646,48 @@ public class MetaProgression
     }
 
     /// <summary>
-    /// 저장할 캐릭터별 구매 기록의 읽기 전용 복사본 생성
+    /// 저장할 계정 공용 메타 강화 구매 기록 생성
     /// </summary>
     /// <returns>구매 단계가 1 이상인 강화 기록</returns>
     public IReadOnlyList<MetaUpgradeRecord> CapturePurchases()
     {
         List<MetaUpgradeRecord> records = new List<MetaUpgradeRecord>();
 
-        foreach (KeyValuePair<(string CharacterId, string UpgradeId), int> entry
-                 in _purchasedRanks)
+        foreach (KeyValuePair<string, int> entry in _purchasedRanks)
         {
-            if (entry.Value == 0)
-                continue;
-
-            records.Add(new MetaUpgradeRecord(entry.Key.CharacterId, entry.Key.UpgradeId, entry.Value));
+            if (entry.Value > 0)
+                records.Add(new MetaUpgradeRecord(entry.Key, entry.Value));
         }
 
         return records.AsReadOnly();
     }
 
     /// <summary>
-    /// 런 진입 전 저장 기록 전체 검증 후 구매 상태 교체
+    /// 저장된 계정 구매 기록 검증 후 전체 단계 복원
     /// </summary>
-    /// <param name="records">복원할 캐릭터별 구매 기록</param>
+    /// <param name="records">계정 공용 메타 강화 구매 기록</param>
     public void RestorePurchases(IReadOnlyList<MetaUpgradeRecord> records)
     {
         if (records == null)
             throw new ArgumentNullException(nameof(records));
 
-        Dictionary<(string CharacterId, string UpgradeId), int> restoredRanks = new Dictionary<(string CharacterId, string UpgradeId), int>();
+        Dictionary<string, int> restoredRanks = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (MetaUpgradeRecord record in records)
         {
-            MetaUpgradeData upgrade = GetUpgrade(record.CharacterId, record.UpgradeId);
-
-            if (!AppliesTo(upgrade, record.CharacterId))
-                throw new InvalidOperationException($"저장된 강화의 대상 캐릭터 불일치: " + $"{record.CharacterId}/{record.UpgradeId}");
+            MetaUpgradeData upgrade = GetUpgrade(record.UpgradeId);
 
             if (record.Rank < 0 || record.Rank > upgrade.MaxRank)
-                throw new InvalidOperationException($"저장된 강화 단계 범위 오류: " + $"{record.CharacterId}/{record.UpgradeId}/{record.Rank}");
+                throw new InvalidOperationException($"저장된 강화 단계 범위 오류: {record.UpgradeId}/{record.Rank}");
 
-            (string CharacterId, string UpgradeId) key = (record.CharacterId, record.UpgradeId);
+            if (restoredRanks.ContainsKey(record.UpgradeId))
+                throw new InvalidOperationException($"중복 계정 구매 기록: {record.UpgradeId}");
 
-            if (restoredRanks.ContainsKey(key))
-                throw new InvalidOperationException($"중복 저장 기록: {key.CharacterId}/{key.UpgradeId}");
-
-            // 비활성 강화의 구매 기록도 보존하고 실제 효과 적용에서 제외
-            restoredRanks.Add(key, record.Rank);
+            restoredRanks.Add(record.UpgradeId, record.Rank);
         }
 
-        // 전체 검증 성공 후 구매 상태 교체
+        // 전체 검증 성공 이후에만 계정 구매 상태 교체
         _purchasedRanks = restoredRanks;
-
         OnChanged?.Invoke();
     }
 }

@@ -35,7 +35,8 @@ public class WorldGraphUIController : MonoBehaviour
     /// 월드 진행과 지도 화면 연결
     /// </summary>
     /// <param name="world">표시할 월드 진행 담당자</param>
-    public void Bind(SessionProgressManager world)
+    /// <param name="actor">이동 요청 플레이어, 플레이어 없는 화면에서는 생략 가능</param>
+    public void Bind(SessionProgressManager world, SkillLoadout actor)
     {
         if (world == null) throw new ArgumentNullException(nameof(world));
         if (_view == null) throw new MissingReferenceException("WorldGraphView 연결 필요");
@@ -43,7 +44,7 @@ public class WorldGraphUIController : MonoBehaviour
             world.gameObject.scene != gameObject.scene || _view.gameObject.scene != gameObject.scene)
             throw new InvalidOperationException("같은 씬의 미연결 Controller와 활성 지도 화면 필요");
         _world = world;
-        _view.Bind(world);
+        _view.Bind(world, actor);
     }
 
     /// <summary>

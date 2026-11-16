@@ -44,6 +44,9 @@ public sealed class CharacterGrowthDefinition : ScriptableObject
     [SerializeField]
     CharacterLevelGrowth[] _levelGrowth = Array.Empty<CharacterLevelGrowth>();
 
+    [Header("----- 메타 장착 슬롯별 필요 캐릭터 숙련도 레벨 -----")]
+    [SerializeField] int[] _slotUnlockLevels = { 1, 1, 1, 4, 6, 10 };
+
     public string CharacterId => _characterId;
     public CharacterDefinition CharacterDefinition => _characterDefinition;
 
@@ -70,6 +73,16 @@ public sealed class CharacterGrowthDefinition : ScriptableObject
     }
 
     /// <summary>
+    /// 지정 메타 장착 슬롯의 필요 숙련도 레벨 조회
+    /// </summary>
+    /// <param name="slot">0부터 시작하는 장착 슬롯 번호</param>
+    /// <returns>슬롯 해금에 필요한 캐릭터 숙련도 레벨</returns>
+    public int GetSlotUnlockLevel(int slot)
+    {
+        return _slotUnlockLevels[slot];
+    }
+
+    /// <summary>
     /// 캐릭터 식별자와 기본 정의 및 성장 행 검사
     /// </summary>
     public void Validate()
@@ -82,6 +95,15 @@ public sealed class CharacterGrowthDefinition : ScriptableObject
 
         if (_levelGrowth == null)
             throw new InvalidOperationException($"{name}: 레벨별 성장 배열 필요");
+
+        if (_slotUnlockLevels == null || _slotUnlockLevels.Length != MetaProgression.EquipSlotCount)
+            throw new InvalidOperationException($"{name}: 메타 장착 슬롯 {MetaProgression.EquipSlotCount}개의 해금 레벨 설정 필요");
+
+        foreach (int requiredLevel in _slotUnlockLevels)
+        {
+            if (requiredLevel < 1)
+                throw new InvalidOperationException($"{name}: 슬롯 해금 레벨은 1 이상 필요");
+        }
 
         foreach (CharacterLevelGrowth growth in _levelGrowth)
         {

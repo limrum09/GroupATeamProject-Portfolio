@@ -16,9 +16,9 @@ internal static class AreaEffectExecutor
     /// <param name="rotation">고정할 기준 회전</param>
     /// <param name="power">방어력과 치명타 적용 전 타격당 위력</param>
     /// <param name="initialTargets">즉시 타격용 검색 결과, 없으면 새로 검색</param>
-    /// <param name="initialExcludedTarget">즉시 타격에서 제외할 직접 피격 대상</param>
+    /// <param name = "excludedTargetId" > 모든 회차에서 제외할 직격 대상의 활성화 식별값</param>
     /// <param name="followCaster">추적 대상, 고정형은 null</param>
-    internal static void Execute(SkillExecutionContext execution, AreaEffectDefinition definition, Vector3 origin, Quaternion rotation, float power, CombatTarget[] initialTargets = null, CombatTarget initialExcludedTarget = null, CombatTarget followCaster = null)
+    internal static void Execute(SkillExecutionContext execution, AreaEffectDefinition definition, Vector3 origin, Quaternion rotation, float power, CombatTarget[] initialTargets = null, Guid? excludedTargetId = null, CombatTarget followCaster = null)
     {
         if (execution == null)
             throw new ArgumentNullException(nameof(execution));
@@ -44,14 +44,14 @@ internal static class AreaEffectExecutor
         {
             if (initialTargets != null)
             {
-                ApplyPulse(execution, initialTargets, power, rotation, initialExcludedTarget);
+                ApplyPulse(execution, initialTargets, power, rotation, definition.HitsPerPulse, excludedTargetId);
             }
             else
             {
-                ExecutePulse(execution, origin, rotation, Vector3.zero, definition.Hitbox, definition.TargetMask, definition.BlockingMask, power, initialExcludedTarget);
+                ExecutePulse(execution, origin, rotation, Vector3.zero, definition.Hitbox, definition.TargetMask, definition.BlockingMask, power, definition.HitsPerPulse, excludedTargetId);
             }
 
-            // 적이 없어도 범위 검사 한 번을 타격 횟수로 계산
+            // 대상 수와 회차 내 타격 횟수에 관계없이 한 회차로 계산
             initialPulseCount = 1;
         }
 
@@ -77,11 +77,18 @@ internal static class AreaEffectExecutor
 
             AreaEffectRuntime runtime = runtimeObject.AddComponent<AreaEffectRuntime>();
 
-            runtime.Initialize(execution, definition, origin, rotation, power, startedAt, initialPulseCount, followCaster);
+            runtime.Initialize(execution, definition, origin, rotation, power, startedAt, initialPulseCount, followCaster, excludedTargetId);
 
             if (followsCaster)
                 followAnchor = runtimeObject.transform;
         }
+
+#if UNITY_EDITOR
+        if (!hasRuntime)
+        {
+            AreaEffectDebugPreview.Show(origin, rotation, definition.Hitbox, execution.SourceScene);
+        }
+#endif
 
         try
         {
@@ -103,8 +110,9 @@ internal static class AreaEffectExecutor
     /// <param name="targetMask">피격 대상 레이어</param>
     /// <param name="blockingMask">차단 검사 레이어</param>
     /// <param name="power">방어력과 치명타 적용 전 피해</param>
-    /// <param name="excludedTarget">이번 회차에서 제외할 대상, 없으면 null</param>
-    internal static void ExecutePulse(SkillExecutionContext execution, Vector3 origin, Quaternion rotation, Vector3 effectOffset, CombatHitbox hitbox, LayerMask targetMask, LayerMask blockingMask, float power, CombatTarget excludedTarget = null)
+    /// <param name="hitsPerPulse">한 회차에서 대상별로 적용할 타격 횟수</param>
+    /// <param name="excludedTargetId">이번 회차에서 제외할 대상의 활성화 식별값</param>
+    internal static void ExecutePulse(SkillExecutionContext execution, Vector3 origin, Quaternion rotation, Vector3 effectOffset, CombatHitbox hitbox, LayerMask targetMask, LayerMask blockingMask, float power, int hitsPerPulse, Guid? excludedTargetId = null)
     {
         if (execution == null)
             throw new ArgumentNullException(nameof(execution));
@@ -117,7 +125,7 @@ internal static class AreaEffectExecutor
 
         CombatTarget[] targets = CombatHitQuery.FindTargets(execution.Source, origin, rotation, effectOffset, hitbox, targetMask, blockingMask);
 
-        ApplyPulse(execution, targets, power, rotation, excludedTarget);
+        ApplyPulse(execution, targets, power, rotation, hitsPerPulse, excludedTargetId);
     }
 
     /// <summary>미리 검색한 중복 없는 대상 목록에 한 회차 피해 적용</summary>
@@ -125,8 +133,9 @@ internal static class AreaEffectExecutor
     /// <param name="targets">FindTargets에서 얻은 중복 제거 대상 배열</param>
     /// <param name="power">방어력과 치명타 적용 전 피해</param>
     /// <param name="rotation">적중 연출 기준 회전</param>
+    /// <param name="hitsPerPulse">한 회차에서 대상별로 적용할 타격 횟수</param>
     /// <param name="excludedTarget">이번 회차에서 제외할 대상, 없으면 null</param>
-    internal static void ApplyPulse(SkillExecutionContext execution, CombatTarget[] targets, float power, Quaternion rotation, CombatTarget excludedTarget = null)
+    internal static void ApplyPulse(SkillExecutionContext execution, CombatTarget[] targets, float power, Quaternion rotation, int hitsPerPulse, Guid? excludedTargetId = null)
     {
         if (execution == null)
             throw new ArgumentNullException(nameof(execution));
@@ -134,15 +143,20 @@ internal static class AreaEffectExecutor
         if (targets == null)
             throw new ArgumentNullException(nameof(targets));
 
-        foreach (CombatTarget target in targets)
+        // 같은 대상 목록에 회차당 타격 횟수만큼 연속 적용
+        for (int hitIndex = 0; hitIndex < hitsPerPulse; hitIndex++)
         {
-            if (!execution.CanContinue)
-                return;
+            foreach (CombatTarget target in targets)
+            {
+                if (!execution.CanContinue)
+                    return;
 
-            if (target == null || target == excludedTarget)
-                continue;
+                // 이전 타격에서 파괴된 대상과 제외 대상 재확인
+                if (target == null)
+                    continue;
 
-            SkillDamageResolver.TryApply(execution, target, power, target.AimPosition, rotation, false);
+                SkillDamageResolver.TryApply(execution, target, power, target.AimPosition, rotation, false);
+            }
         }
     }
 }

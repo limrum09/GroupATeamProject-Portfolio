@@ -90,6 +90,7 @@ public abstract class SkillDefinition : ScriptableObject
 
     [Header("----- 사용 시간 -----")]
     [SerializeField, Min(0f)] float _castTime = 0.5f;
+    [SerializeField, Min(0f)] float _postCastMoveLockDuration = 0f;
     [SerializeField, Min(0f)] float _cooldown = 4f;
 
     [Header("----- 모션 -----")]
@@ -117,6 +118,7 @@ public abstract class SkillDefinition : ScriptableObject
 
     public string SkillUID => _skillUID;
     public float CastTime => _castTime;
+    public float PostCastMoveLockDuration => _postCastMoveLockDuration;
     public float Cooldown => _cooldown;
     public AnimationClip MotionClip => motionClip;
     public SkillTargetMode TargetMode => _targetMode;
@@ -137,6 +139,7 @@ public abstract class SkillDefinition : ScriptableObject
     protected virtual void OnValidate()
     {
         _castTime = Mathf.Max(0f, _castTime);
+        _postCastMoveLockDuration = Mathf.Max(0f, _postCastMoveLockDuration);
         _cooldown = Mathf.Max(0f, _cooldown);
         _range = Mathf.Max(0.1f, _range);
     }

@@ -80,14 +80,11 @@ public class MetaSaveChanges
             if (purchases == null)
                 throw new ArgumentNullException(nameof(purchases));
 
-            _fields["purchases"] = JArray.FromObject(
-                purchases.Select(record => new MetaProfileData.PurchaseData
-                {
-                    CharacterId = record.CharacterId,
-                    UpgradeId = record.UpgradeId,
-                    Rank = record.Rank
-                }).ToArray(),
-                serializer);
+            _fields["purchases"] = JArray.FromObject(purchases.Select(record => new MetaProfileData.PurchaseData
+            {
+                UpgradeId = record.UpgradeId,
+                Rank = record.Rank
+            }).ToArray(), serializer);
         }
 
         if ((parts & MetaSavePart.Loadouts) != 0)
@@ -100,8 +97,7 @@ public class MetaSaveChanges
                 {
                     CharacterId = record.CharacterId,
                     Slots = record.Slots.ToArray()
-                }).ToArray(),
-                serializer);
+                }).ToArray(), serializer);
         }
 
         if ((parts & MetaSavePart.Mastery) != 0)
@@ -114,8 +110,7 @@ public class MetaSaveChanges
                 {
                     CharacterId = record.CharacterId,
                     TotalExperience = record.TotalExperience
-                }).ToArray(),
-                serializer);
+                }).ToArray(), serializer);
         }
 
         if ((parts & MetaSavePart.DailyQuests) != 0)

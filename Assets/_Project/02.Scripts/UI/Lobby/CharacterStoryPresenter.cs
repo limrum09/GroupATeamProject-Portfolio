@@ -25,6 +25,10 @@ public class CharacterStoryPresenter : MonoBehaviour
     string _characterId;
     int? _masteryLevel;
     bool _isMasteryTest;
+#if UNITY_EDITOR
+    long _testCurrentExperience;
+    long _testRequiredExperience;
+#endif
 
     readonly Dictionary<CharacterStoryDefinition, CharacterStoryContent> _contents =
         new Dictionary<CharacterStoryDefinition, CharacterStoryContent>();
@@ -162,8 +166,23 @@ public class CharacterStoryPresenter : MonoBehaviour
         if (!_isMasteryTest || _visibleContent == null) return;
 
         _masteryLevel = _testMasteryLevel;
+        _testCurrentExperience = 0;
         _view.ShowMastery(_masteryLevel, 0, null);
         RefreshStoryList();
+    }
+
+    [ContextMenu("스토리 해금 테스트/경험치 +2")]
+    void AddTwoTestMasteryExperience()
+    {
+        if (!Application.isPlaying || !_isMasteryTest || _visibleContent == null)
+            return;
+
+        if (_testRequiredExperience <= 0 || _testCurrentExperience >= _testRequiredExperience)
+            return;
+
+        long remainingExperience = _testRequiredExperience - _testCurrentExperience;
+        _testCurrentExperience += Math.Min(20L, remainingExperience);
+        _view.ShowMastery(_masteryLevel, _testCurrentExperience, _testRequiredExperience);
     }
 #endif
 
@@ -221,6 +240,8 @@ public class CharacterStoryPresenter : MonoBehaviour
         _isMasteryTest = false;
 #if UNITY_EDITOR
         _isMasteryTest = _useTestMasteryLevel && Application.isPlaying;
+        _testCurrentExperience = currentExperience;
+        _testRequiredExperience = masteryLevel.HasValue ? requiredExperience : 0;
 #endif
         _masteryLevel = _isMasteryTest ? _testMasteryLevel : masteryLevel;
 

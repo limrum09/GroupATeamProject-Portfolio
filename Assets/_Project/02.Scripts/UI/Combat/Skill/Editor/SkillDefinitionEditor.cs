@@ -1,15 +1,16 @@
-using System;
+ï»¿using System;
 using System.Collections.Generic;
 using UnityEditor;
 
 /// <summary>
-/// ½ºÅ³ Á¾·ù¿Í ¿É¼Ç¿¡ ÇÊ¿äÇÑ ¼³Á¤¸¸ Ç¥½ÃÇÏ´Â Inspector
+/// ìŠ¤í‚¬ ì¢…ë¥˜ì™€ ì˜µì…˜ì— í•„ìš”í•œ ì„¤ì •ë§Œ í‘œì‹œí•˜ëŠ” Inspector
 /// </summary>
 [CustomEditor(typeof(SkillDefinition), true)]
 public class SkillDefinitionEditor : Editor
 {
-    readonly Dictionary<string, SerializedProperty> _properties =
-        new Dictionary<string, SerializedProperty>();
+    readonly Dictionary<string, SerializedProperty> _properties = new Dictionary<string, SerializedProperty>();
+
+    public bool IsEmbedded { get; set; }
 
     void OnEnable()
     {
@@ -29,9 +30,7 @@ public class SkillDefinitionEditor : Editor
 
     void Draw(string propertyName)
     {
-        EditorGUILayout.PropertyField(
-            _properties[propertyName],
-            true);
+        EditorGUILayout.PropertyField(_properties[propertyName], true);
     }
 
     bool HasReference(string propertyName)
@@ -41,8 +40,7 @@ public class SkillDefinitionEditor : Editor
 
     bool UsesTargetProjectile()
     {
-        return target is TargetDamageSkillDefinition &&
-            _properties["_useProjectile"].boolValue;
+        return target is TargetDamageSkillDefinition && _properties["_useProjectile"].boolValue;
     }
 
     void DrawCommonSettings()
@@ -56,6 +54,10 @@ public class SkillDefinitionEditor : Editor
         Draw("_levelGrowth");
 
         Draw("_castTime");
+
+        if (target is TargetDamageSkillDefinition || target is AreaDamageSkillDefinition)
+            Draw("_postCastMoveLockDuration");
+
         Draw("_cooldown");
         Draw("motionClip");
     }
@@ -64,19 +66,15 @@ public class SkillDefinitionEditor : Editor
     {
         Draw("_targetMode");
 
-        SkillTargetMode targetMode =
-            (SkillTargetMode)_properties["_targetMode"].intValue;
+        SkillTargetMode targetMode = (SkillTargetMode)_properties["_targetMode"].intValue;
 
         bool selectsTarget = targetMode != SkillTargetMode.None;
 
-        // °ø°İ ½ºÅ³ÀÇ »ç°Å¸®´Â Àû AI¿Í ±âº» °ø°İ¿¡¼­µµ »ç¿ë
+        // ê³µê²© ìŠ¤í‚¬ì˜ ì‚¬ê±°ë¦¬ëŠ” ì  AIì™€ ê¸°ë³¸ ê³µê²©ì—ì„œë„ ì‚¬ìš©
         if (!(target is MovementSkillDefinition) || selectsTarget)
             Draw("_range");
 
-        bool usesTargetMask =
-            selectsTarget ||
-            UsesTargetProjectile() ||
-            target is ChargeAttackSkillDefinition;
+        bool usesTargetMask = selectsTarget || UsesTargetProjectile() || target is ChargeAttackSkillDefinition;
 
         if (usesTargetMask)
             Draw("_targetMask");
@@ -91,6 +89,13 @@ public class SkillDefinitionEditor : Editor
         Draw("_spellPowerMultiplier");
         Draw("_blockingMask");
         Draw("_onHitAreaEffect");
+
+        if (HasReference("_onHitAreaEffect"))
+        {
+            EditorGUILayout.PropertyField(_properties["_applyDirectDamage"], new UnityEngine.GUIContent("ì§ê²© í”¼í•´ ì ìš©"));
+
+            EditorGUILayout.PropertyField(_properties["_includeDirectTargetInArea"], new UnityEngine.GUIContent("ì§ê²© ëŒ€ìƒë„ ë²”ìœ„ í”¼í•´ì— í¬í•¨"));
+        }
 
         Draw("_useProjectile");
 
@@ -112,31 +117,16 @@ public class SkillDefinitionEditor : Editor
         Draw("_deliveryMode");
         Draw("_trackingMode");
 
-        AreaPlacementMode placementMode =
-            (AreaPlacementMode)_properties["_placementMode"].intValue;
-
-        AreaDeliveryMode deliveryMode =
-            (AreaDeliveryMode)_properties["_deliveryMode"].intValue;
-
-        AreaTrackingMode trackingMode =
-            (AreaTrackingMode)_properties["_trackingMode"].intValue;
+        AreaPlacementMode placementMode = (AreaPlacementMode)_properties["_placementMode"].intValue;
+        AreaDeliveryMode deliveryMode = (AreaDeliveryMode)_properties["_deliveryMode"].intValue;
+        AreaTrackingMode trackingMode = (AreaTrackingMode)_properties["_trackingMode"].intValue;
 
         if (trackingMode == AreaTrackingMode.FollowCaster)
         {
-            AreaEffectDefinition effect =
-                _properties["_areaEffect"].objectReferenceValue
-                as AreaEffectDefinition;
+            AreaEffectDefinition effect = _properties["_areaEffect"].objectReferenceValue as AreaEffectDefinition;
 
-            if (placementMode != AreaPlacementMode.CasterPosition
-                || deliveryMode != AreaDeliveryMode.Direct
-                || effect == null
-                || effect.DamageMode != AreaEffectDamageMode.Repeat)
-            {
-                EditorGUILayout.HelpBox(
-                    "FollowCaster´Â CasterPosition / Direct ¹èÄ¡¿Í "
-                    + "Repeat ¹æ½ÄÀÇ Area Effect ¿¬°á ÇÊ¿ä",
-                    MessageType.Error);
-            }
+            if (placementMode != AreaPlacementMode.CasterPosition || deliveryMode != AreaDeliveryMode.Direct || effect == null || effect.DamageMode != AreaEffectDamageMode.Repeat)
+                EditorGUILayout.HelpBox("FollowCasterëŠ” CasterPosition / Direct ë°°ì¹˜ì™€ " + "Repeat ë°©ì‹ì˜ Area Effect ì—°ê²° í•„ìš”", MessageType.Error);
         }
 
         if (placementMode == AreaPlacementMode.RequestedWorldPosition)
@@ -162,8 +152,7 @@ public class SkillDefinitionEditor : Editor
         Draw("_mode");
         Draw("_distance");
 
-        MovementSkillMode mode =
-            (MovementSkillMode)_properties["_mode"].intValue;
+        MovementSkillMode mode = (MovementSkillMode)_properties["_mode"].intValue;
 
         if (mode == MovementSkillMode.Dash)
             Draw("_dashDuration");
@@ -188,17 +177,15 @@ public class SkillDefinitionEditor : Editor
         {
             Draw("_useEffectRotation");
 
-            // ´ë»ó ÅºÈ¯ÀÇ ¹ßµ¿ ÀÌÆåÆ®´Â ¹ß»ç À§Ä¡¸¦ ±×´ë·Î »ç¿ë
-            // ¹üÀ§ ½ºÅ³ÀÇ ÀåÆÇ ÀÌÆåÆ®´Â Àü´Ş ¹æ½Ä°ú °ü°è¾øÀÌ º¸Á¤ »ç¿ë
+            // ëŒ€ìƒ íƒ„í™˜ì˜ ë°œë™ ì´í™íŠ¸ëŠ” ë°œì‚¬ ìœ„ì¹˜ë¥¼ ê·¸ëŒ€ë¡œ ì‚¬ìš©
+            // ë²”ìœ„ ìŠ¤í‚¬ì˜ ì¥íŒ ì´í™íŠ¸ëŠ” ì „ë‹¬ ë°©ì‹ê³¼ ê´€ê³„ì—†ì´ ë³´ì • ì‚¬ìš©
             if (!UsesTargetProjectile())
                 Draw("_effectOffset");
         }
 
-        // ¹üÀ§ ½ºÅ³Àº °øÅë Hit Effect¸¦ »ç¿ëÇÏÁö ¾ÊÀ¸¸ç
-        // ÀÌµ¿ ½ºÅ³Àº ÇÇÇØ ÀûÁß ÀÌº¥Æ®¸¦ ¹ß»ı½ÃÅ°Áö ¾ÊÀ½
-        bool usesHitEffect =
-            target is TargetDamageSkillDefinition ||
-            target is ChargeAttackSkillDefinition;
+        // ë²”ìœ„ ìŠ¤í‚¬ì€ ê³µí†µ Hit Effectë¥¼ ì‚¬ìš©í•˜ì§€ ì•Šìœ¼ë©°
+        // ì´ë™ ìŠ¤í‚¬ì€ í”¼í•´ ì ì¤‘ ì´ë²¤íŠ¸ë¥¼ ë°œìƒì‹œí‚¤ì§€ ì•ŠìŒ
+        bool usesHitEffect = target is TargetDamageSkillDefinition || target is ChargeAttackSkillDefinition;
 
         if (usesHitEffect)
         {
@@ -214,71 +201,52 @@ public class SkillDefinitionEditor : Editor
 
     void DrawConfigurationHelp()
     {
-        SkillTargetMode targetMode =
-            (SkillTargetMode)_properties["_targetMode"].intValue;
+        SkillTargetMode targetMode = (SkillTargetMode)_properties["_targetMode"].intValue;
 
-        SkillAimMode aimMode =
-            (SkillAimMode)_properties["_aimMode"].intValue;
+        SkillAimMode aimMode = (SkillAimMode)_properties["_aimMode"].intValue;
 
-        if (aimMode == SkillAimMode.SelectedTarget &&
-            targetMode == SkillTargetMode.None)
-        {
-            EditorGUILayout.HelpBox(
-                "Aim Mode°¡ Selected TargetÀÌ¸é " +
-                "Target Mode¿¡¼­ ´ë»ó ¼±ÅÃ ¹æ½ÄÀ» ÁöÁ¤ÇØ¾ß ÇÕ´Ï´Ù.",
-                MessageType.Error);
-        }
+        if (aimMode == SkillAimMode.SelectedTarget && targetMode == SkillTargetMode.None)
+            EditorGUILayout.HelpBox("Aim Modeê°€ Selected Targetì´ë©´ " + "Target Modeì—ì„œ ëŒ€ìƒ ì„ íƒ ë°©ì‹ì„ ì§€ì •í•´ì•¼ í•©ë‹ˆë‹¤.", MessageType.Error);
 
-        bool requiresRequestedDirection =
-            target is MovementSkillDefinition ||
-            target is ChargeAttackSkillDefinition;
+        bool requiresRequestedDirection = target is MovementSkillDefinition || target is ChargeAttackSkillDefinition;
 
         if (target is AreaDamageSkillDefinition)
         {
-            AreaPlacementMode placementMode =
-                (AreaPlacementMode)_properties["_placementMode"].intValue;
+            AreaPlacementMode placementMode = (AreaPlacementMode)_properties["_placementMode"].intValue;
 
-            AreaDeliveryMode deliveryMode =
-                (AreaDeliveryMode)_properties["_deliveryMode"].intValue;
+            AreaDeliveryMode deliveryMode = (AreaDeliveryMode)_properties["_deliveryMode"].intValue;
 
             if (placementMode == AreaPlacementMode.RequestedWorldPosition)
                 requiresRequestedDirection = true;
 
-            if (deliveryMode == AreaDeliveryMode.Projectile &&
-                placementMode != AreaPlacementMode.RequestedWorldPosition)
+            if (deliveryMode == AreaDeliveryMode.Projectile && placementMode != AreaPlacementMode.RequestedWorldPosition)
             {
-                EditorGUILayout.HelpBox(
-                    "¹üÀ§ ½ºÅ³ÀÇ Projectile Àü´Ş ¹æ½ÄÀº " +
-                    "Requested World Position ¹èÄ¡ ¹æ½ÄÀÌ ÇÊ¿äÇÕ´Ï´Ù.",
-                    MessageType.Error);
+                EditorGUILayout.HelpBox("ë²”ìœ„ ìŠ¤í‚¬ì˜ Projectile ì „ë‹¬ ë°©ì‹ì€ " + "Requested World Position ë°°ì¹˜ ë°©ì‹ì´ í•„ìš”í•©ë‹ˆë‹¤.", MessageType.Error);
             }
         }
 
-        if (requiresRequestedDirection &&
-            (targetMode != SkillTargetMode.None ||
-             aimMode != SkillAimMode.RequestedDirection))
+        if (requiresRequestedDirection && (targetMode != SkillTargetMode.None || aimMode != SkillAimMode.RequestedDirection))
         {
-            EditorGUILayout.HelpBox(
-                "ÀÌ ½ºÅ³ ¼³Á¤¿¡¼­´Â Target Mode¸¦ None, " +
-                "Aim Mode¸¦ Requested DirectionÀ¸·Î ÁöÁ¤ÇØ¾ß ÇÕ´Ï´Ù.",
-                MessageType.Error);
+            EditorGUILayout.HelpBox("ì´ ìŠ¤í‚¬ ì„¤ì •ì—ì„œëŠ” Target Modeë¥¼ None, " + "Aim Modeë¥¼ Requested Directionìœ¼ë¡œ ì§€ì •í•´ì•¼ í•©ë‹ˆë‹¤.", MessageType.Error);
         }
     }
 
     /// <summary>
-    /// °øÅë ¼³Á¤°ú ½ºÅ³ Á¾·ùº° Á¶°ÇºÎ Ç×¸ñ Ç¥½Ã
+    /// ê³µí†µ ì„¤ì •ê³¼ ìŠ¤í‚¬ ì¢…ë¥˜ë³„ ì¡°ê±´ë¶€ í•­ëª© í‘œì‹œ
     /// </summary>
     public override void OnInspectorGUI()
     {
+        if (!IsEmbedded && UnityEngine.GUILayout.Button("ê´€ë¦¬ì°½ì—ì„œ ì—´ê¸°"))
+        {
+            SkillManagementWindow.Open((SkillDefinition)target);
+            UnityEngine.GUIUtility.ExitGUI();
+        }
+
         Type definitionType = target.GetType();
 
-        bool supported =
-            definitionType == typeof(TargetDamageSkillDefinition) ||
-            definitionType == typeof(AreaDamageSkillDefinition) ||
-            definitionType == typeof(MovementSkillDefinition) ||
-            definitionType == typeof(ChargeAttackSkillDefinition);
+        bool supported = definitionType == typeof(TargetDamageSkillDefinition) || definitionType == typeof(AreaDamageSkillDefinition) || definitionType == typeof(MovementSkillDefinition) || definitionType == typeof(ChargeAttackSkillDefinition);
 
-        // ´Ù¸¥ ÆÄ»ı Å¸ÀÔÀº ±âº» Inspector·Î ¸ğµç ÇÊµå Ç¥½Ã
+        // ë‹¤ë¥¸ íŒŒìƒ íƒ€ì…ì€ ê¸°ë³¸ Inspectorë¡œ ëª¨ë“  í•„ë“œ í‘œì‹œ
         if (!supported)
         {
             DrawDefaultInspector();

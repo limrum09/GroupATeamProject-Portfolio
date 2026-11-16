@@ -353,6 +353,40 @@ public class WorldGraphGenerator
         return true;
     }
 
+    Vector2[] PullLayoutTowardCenter(Vector2[] positions, List<List<int>> connections, float pull)
+    {
+        if (pull <= 0f) return positions;
+
+        Vector2 center = Vector2.zero;
+        foreach (Vector2 position in positions)
+            center += position;
+        center /= positions.Length;
+
+        float outerRadius = 0f;
+        foreach (Vector2 position in positions)
+            outerRadius = Mathf.Max(outerRadius, Vector2.Distance(position, center));
+        if (outerRadius <= 0f) return positions;
+
+        Vector2[] candidate = new Vector2[positions.Length];
+        const int maximumAttempts = 4;
+        for (int attempt = 0; attempt < maximumAttempts; attempt++)
+        {
+            for (int id = 0; id < positions.Length; id++)
+            {
+                Vector2 offset = positions[id] - center;
+                float distanceWeight = offset.magnitude / outerRadius;
+                candidate[id] = positions[id] - offset * (pull * distanceWeight);
+            }
+
+            if (IsLayoutValid(candidate, connections))
+                return candidate;
+
+            pull *= 0.5f;
+        }
+
+        return positions;
+    }
+
     Vector2[] CreateLayout(WorldGraphGenerationSettings settings, int seed,
         List<Vector2Int> coordinates, List<List<int>> connections)
     {
@@ -380,7 +414,7 @@ public class WorldGraphGenerator
                 positions[id] = original;
             }
         }
-        return positions;
+        return PullLayoutTowardCenter(positions, connections, settings.CenterPullStrength);
     }
 
     WorldGraphGenerationResult CreateResult(WorldGraphGenerationSettings settings, int seed,
