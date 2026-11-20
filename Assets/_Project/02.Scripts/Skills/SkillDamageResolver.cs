@@ -4,6 +4,12 @@ using UnityEngine;
 /// <summary>스킬 피해 계산과 단일 타격 적용</summary>
 internal static class SkillDamageResolver
 {
+    // 타격 처리와 툴팁에서 공유하는 레벨별 계수
+    internal static (float attack, float spell) GetMultipliers(float baseAttack, float baseSpell, SkillGrowthBonus growth)
+    {
+        return (baseAttack + growth.AttackMultiplierIncrease, baseSpell + growth.SpellMultiplierIncrease);
+    }
+
     /// <summary>발동 시 저장한 공격 수치와 성장값으로 기본 피해 계산</summary>
     /// <param name="execution">발동 단위 실행 정보</param>
     /// <param name="damageMultiplier">공격력 계수</param>
@@ -14,9 +20,7 @@ internal static class SkillDamageResolver
         if (execution == null)
             throw new ArgumentNullException(nameof(execution));
 
-        float attackMultiplier = damageMultiplier + execution.Growth.AttackMultiplierIncrease;
-
-        float spellMultiplier = spellPowerMultiplier + execution.Growth.SpellMultiplierIncrease;
+        (float attackMultiplier, float spellMultiplier) = GetMultipliers(damageMultiplier, spellPowerMultiplier, execution.Growth);
 
         float power = execution.AttackPower * attackMultiplier + execution.SpellPower * spellMultiplier;
 

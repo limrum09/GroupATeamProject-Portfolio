@@ -153,7 +153,9 @@ public sealed class SkillBarPresenter : IDisposable
         if (!_view.ShowsFixedSkills)
             return;
 
-        SkillDefinition basicAttack = _combat.BasicAttackDefinition;
+        BasicAttackComboDefinition basicAttackCombo = _combat.BasicAttackComboDefinition;
+        // 단계별 지정 스킬과 무관하게 기본 공격 스킬을 대표 아이콘으로 표시
+        SkillDefinition basicAttack = basicAttackCombo != null ? basicAttackCombo.Skill : null;
         SkillDefinition movement = _combat.MovementDefinition;
 
         _view.ShowFixedSlot(FixedSkillSlotKind.BasicAttack, basicAttack != null ? basicAttack.SkillIcon : null);
@@ -177,7 +179,7 @@ public sealed class SkillBarPresenter : IDisposable
 
     void RefreshTooltip()
     {
-        if (_upgradeMode || _draggedSkill != null)
+        if (_draggedSkill != null || (_upgradeMode && _hoveredFixedSlot != FixedSkillSlotKind.None))
         {
             _view.HideTooltip();
             return;
@@ -185,10 +187,13 @@ public sealed class SkillBarPresenter : IDisposable
 
         SkillDefinition definition;
         int level;
+        SkillTooltipMode mode = SkillTooltipMode.Current;
 
         if (_hoveredFixedSlot == FixedSkillSlotKind.BasicAttack)
         {
-            definition = _combat.BasicAttackDefinition;
+            BasicAttackComboDefinition basicAttackCombo = _combat.BasicAttackComboDefinition;
+
+            definition = basicAttackCombo != null ? basicAttackCombo.Skill : null;
             level = _combat.BasicAttackLevel;
         }
         else if (_hoveredFixedSlot == FixedSkillSlotKind.Movement)
@@ -214,6 +219,8 @@ public sealed class SkillBarPresenter : IDisposable
 
             definition = skill.Definition;
             level = skill.Level;
+            if (_upgradeMode)
+                mode = skill.CanLevelUp ? SkillTooltipMode.NextLevel : SkillTooltipMode.MaxLevel;
         }
 
         if (definition == null)
@@ -222,7 +229,11 @@ public sealed class SkillBarPresenter : IDisposable
             return;
         }
 
-        _view.ShowTooltip(definition.SkillName, level, definition.SkillDescription);
+        bool previewUpgrade = mode == SkillTooltipMode.NextLevel;
+        string title = _hoveredFixedSlot == FixedSkillSlotKind.None
+            ? SkillDescriptionFormatter.FormatTitle(definition, level, previewUpgrade)
+            : definition.SkillName;
+        _view.ShowTooltip(title, level, SkillDescriptionFormatter.FormatDescription(definition, level, previewUpgrade), mode);
     }
 
     void CaptureHoveredSlot()

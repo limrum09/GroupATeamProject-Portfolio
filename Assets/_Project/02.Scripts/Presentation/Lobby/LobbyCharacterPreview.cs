@@ -13,6 +13,10 @@ public sealed class LobbyCharacterPreview : MonoBehaviour
     [Header("----- 더미 표시 위치 -----")]
     [SerializeField] Transform _anchor;
 
+    [Header("----- 선택 연출 -----")]
+    // 비워 두면 연출 없이 즉시 교체
+    [SerializeField] LobbyCharacterSwapEffect _swapEffect;
+
     Animator _instance;
     PlayerAnimation _displayedPrefab;
 
@@ -117,6 +121,10 @@ public sealed class LobbyCharacterPreview : MonoBehaviour
 
         if (previous != null)
         {
+            // 이전 더미는 즉시 제거, 새 더미는 에너지 실체화로 등장
+            if (_swapEffect != null)
+                _swapEffect.Play(next, _anchor);
+
             previous.gameObject.SetActive(false);
             Destroy(previous.gameObject);
         }

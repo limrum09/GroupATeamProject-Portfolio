@@ -12,6 +12,8 @@ public sealed class CombatController : MonoBehaviour
 
     [Header("----- 기본 공격 -----")]
     [SerializeField] LayerMask _blockingMask;
+    [Tooltip("켜면 기본 공격 중에도 일반 이동 허용")]
+    [SerializeField] bool _allowMoveDuringBasicAttack;
 
     [Header("----- 범위 미리보기 -----")]
     [SerializeField] SkillDefinition _previewSkill;
@@ -23,18 +25,23 @@ public sealed class CombatController : MonoBehaviour
     ICombatMovement _movement;
     CombatActionKind _action;
     CombatTarget _actionTarget;
-    SkillInstance _basicAttack;
+    BasicAttackCombo _basicAttackCombo;
     SkillInstance _castingSkill;
     SkillInstance _movementSkill;
     Vector3 _actionDirection;
     Vector3 _actionWorldPosition;
-    
+    // 이동 단계가 있는 행동의 확정된 이동 거리
+    float _actionMoveDistance;
+    // 이동 완료 시 도착 효과에 사용할 이동 시작 시점 실행 정보
+    SkillExecutionContext _movementExecution;
+
     long _nextActionId;
     long _actionId;
     double _actionStartedAt;
     double _finishAt;
     double _nextAttackAt;
     double _postCastMoveLockUntil;
+    AnimationClip _actionMotionClip;
     bool _actionHasWorldPosition;
     bool _movementExecuting;
 
@@ -47,24 +54,29 @@ public sealed class CombatController : MonoBehaviour
     public CombatTarget Owner => _owner;
     public SkillLoadout Skills => _skills;
     public CombatActionKind Action => _action;
-    public TargetDamageSkillDefinition BasicAttackDefinition => _owner.Status.Definition.BasicAttackSkill;
+    public BasicAttackComboDefinition BasicAttackComboDefinition => _owner.Status.Definition.BasicAttackCombo;
     public MovementSkillDefinition MovementDefinition => _movementSkill != null ? (MovementSkillDefinition)_movementSkill.Definition : null;
-    public int BasicAttackLevel => _basicAttack != null ? _basicAttack.Level : 0;
+    public int BasicAttackLevel => _basicAttackCombo != null ? _basicAttackCombo.Skill.Level : 0;
     public int MovementSkillLevel => _movementSkill != null ? _movementSkill.Level : 0;
     // 고정 이동 스킬의 실제 남은 쿨타임
     public float MovementSkillRemainingCooldown => _movementSkill != null ? _movementSkill.RemainingCooldown : 0f;
     // 고정 이동 스킬의 실제 남은 쿨타임 비율
     public float MovementSkillCooldownRemainingRatio => _movementSkill != null ? _movementSkill.CooldownRemainingRatio : 0f;
-    public float AttackRange => BasicAttackDefinition != null ? BasicAttackDefinition.Range : _owner.Status.Definition.AttackRange;
-    LayerMask BasicBlockingMask => BasicAttackDefinition != null ? BasicAttackDefinition.BlockingMask : _blockingMask;
+    public float AttackRange => BasicAttackComboDefinition != null ? BasicAttackComboDefinition.Range : _owner.Status.Definition.AttackRange;
+    LayerMask BasicBlockingMask => BasicAttackComboDefinition != null ? BasicAttackComboDefinition.BlockingMask : _blockingMask;
     public bool IsBusy => _action != CombatActionKind.None;
     public bool IsCasting => _action == CombatActionKind.Skill;    
     // 현재 시전 중인 FollowCaster 스킬의 일반 이동 허용 여부
     bool AllowsMovementDuringCast => IsCasting && _castingSkill.Definition is AreaDamageSkillDefinition area && area.TrackingMode == AreaTrackingMode.FollowCaster;
+    // 이동 허용 설정을 켠 소유자의 기본 공격 중 일반 이동 허용 여부
+    bool AllowsMovementDuringBasicAttack => _allowMoveDuringBasicAttack && _action == CombatActionKind.BasicAttack;
     // 게임 시간 기준의 발동 후 이동 제한 여부
     bool IsPostCastMoveLocked => Time.timeAsDouble < _postCastMoveLockUntil;
+    // 기본 공격 중 이동 허용 설정 여부
+    public bool MovesDuringBasicAttack => _allowMoveDuringBasicAttack;
     // 전투 행동과 발동 후 이동 제한을 반영한 일반 이동 허용 여부
-    public bool CanMove => isActiveAndEnabled && _owner.IsAlive && !IsPostCastMoveLocked && (!IsBusy || AllowsMovementDuringCast);
+    public bool CanMove => isActiveAndEnabled && _owner.IsAlive && !IsPostCastMoveLocked
+        && (!IsBusy || AllowsMovementDuringCast || AllowsMovementDuringBasicAttack);
     // 기본 공격 취소와 발동 후 이동 제한을 반영한 이동 요청 허용 여부
     public bool CanRequestMovement => isActiveAndEnabled && _owner.IsAlive && !IsPostCastMoveLocked && (!IsCasting || AllowsMovementDuringCast);
 
@@ -81,7 +93,7 @@ public sealed class CombatController : MonoBehaviour
 
             SkillDefinition skill = _castingSkill != null ? _castingSkill.Definition : null;
 
-            return new CombatActionInfo(_actionId, _action, _actionTarget, skill, _actionStartedAt, (float)(endAt - _actionStartedAt), _actionDirection, _actionWorldPosition, _actionHasWorldPosition); 
+            return new CombatActionInfo(_actionId, _action, _actionTarget, skill, _actionStartedAt, (float)(endAt - _actionStartedAt), _actionDirection, _actionWorldPosition, _actionHasWorldPosition, _actionMotionClip);
         }
     }
 
@@ -104,7 +116,7 @@ public sealed class CombatController : MonoBehaviour
         // 플레이어 전용 정의의 고정 스킬은 런 시작 단계에서 초기화
         // 기존 공통 정의와 적의 기본 공격 초기화 경로 유지
         if (!(_owner.Status.Definition is PlayerDefinition))
-            _basicAttack = CreateBasicAttackInstance(BasicAttackDefinition);
+            _basicAttackCombo = CreateBasicAttackCombo(BasicAttackComboDefinition);
     }
 
     void OnEnable()
@@ -118,6 +130,7 @@ public sealed class CombatController : MonoBehaviour
             _owner.Status.OnDied -= HandleOwnerDied;
 
         _postCastMoveLockUntil = 0d;
+        ResetBasicAttackCombo();
         CancelAction();
     }
 
@@ -162,21 +175,26 @@ public sealed class CombatController : MonoBehaviour
         CompletedAction(_actionId);
     }
 
-    static SkillInstance CreateBasicAttackInstance(TargetDamageSkillDefinition definition)
+    static BasicAttackCombo CreateBasicAttackCombo(BasicAttackComboDefinition definition)
     {
-        // 고정 기본 공격 미지정 시 기존 기본 공격 경로 사용
+        // 고정 기본 공격 콤보 미지정 시 기존 기본 공격 경로 사용
         if (definition == null)
             return null;
 
-        SkillExecutor.ValidateDefinition(definition);
-
-        return new SkillInstance(definition, 1, true);
+        return new BasicAttackCombo(definition);
     }
 
     void HandleOwnerDied()
     {
         _postCastMoveLockUntil = 0d;
+        ResetBasicAttackCombo();
         CancelAction();
+    }
+
+    void ResetBasicAttackCombo()
+    {
+        if (_basicAttackCombo != null)
+            _basicAttackCombo.Reset();
     }
 
     void CompletedAction(long actionId)
@@ -190,9 +208,9 @@ public sealed class CombatController : MonoBehaviour
             return;
         }
 
-        if (_castingSkill != null && _castingSkill.Definition is MovementSkillDefinition movementDefinition)
+        if (_castingSkill != null && _castingSkill.Definition is ISkillMovementSettings movementSettings)
         {
-            BeginMovementExecution(movementDefinition);
+            BeginMovementExecution(movementSettings);
             return;
         }
 
@@ -206,7 +224,8 @@ public sealed class CombatController : MonoBehaviour
         float basicRange = AttackRange;
         LayerMask basicBlockingMask = BasicBlockingMask;
 
-        if (skill != null && skill.Definition is TargetDamageSkillDefinition targeted && !targeted.UseProjectile && target != null)
+        // 시전자 위치 재생을 켠 대상 공격은 이펙트 기준점 유지
+        if (skill != null && skill.Definition is TargetDamageSkillDefinition targeted && !targeted.UseProjectile && !targeted.UseEffectAtCaster && target != null)
             effectOrigin = target.Position;
 
         if (skill != null && skill.Definition is AreaDamageSkillDefinition area && area.DeliveryMode == AreaDeliveryMode.Direct)
@@ -215,9 +234,13 @@ public sealed class CombatController : MonoBehaviour
         // 이후에는 시전자 객체의 생존 상태와 독립적으로 실행
         SkillExecutionContext execution = new SkillExecutionContext(_owner, skill, completedAction);
 
-        if (completedAction.Kind == CombatActionKind.BasicAttack && skill != null)
+        // 실행 확정 시점에 다음 공격 가능 시각 갱신
+        if (completedAction.Kind == CombatActionKind.BasicAttack && _basicAttackCombo != null)
         {
-            _nextAttackAt = Time.timeAsDouble + GetBasicAttackInterval();
+            if (_basicAttackCombo.IsCombo)
+                _basicAttackCombo.Complete(completedAction.StartedAt, GetBasicAttackSpeedRate());
+            else
+                _nextAttackAt = Time.timeAsDouble + GetBasicAttackInterval();
         }
 
         ResetActionState();
@@ -240,7 +263,7 @@ public sealed class CombatController : MonoBehaviour
             {
                 effectOrigin = projectile.transform.position;
 
-                completedAction = new CombatActionInfo(completedAction.Id, completedAction.Kind, completedAction.Target, completedAction.Skill, completedAction.StartedAt, completedAction.Duration, projectile.Direction, completedAction.WorldPosition, completedAction.HasWorldPosition);
+                completedAction = new CombatActionInfo(completedAction.Id, completedAction.Kind, completedAction.Target, completedAction.Skill, completedAction.StartedAt, completedAction.Duration, projectile.Direction, completedAction.WorldPosition, completedAction.HasWorldPosition, completedAction.MotionClip);
             }
         }
         else if (completedAction.Kind == CombatActionKind.BasicAttack)
@@ -255,10 +278,13 @@ public sealed class CombatController : MonoBehaviour
         OnActionChanged?.Invoke();
     }
 
-    bool BeginSkillAction(SkillInstance skill, Vector3 direction, CombatTarget target, Vector3 worldPosition, bool hasWorldPosition)
+    bool BeginSkillAction(SkillInstance skill, Vector3 direction, CombatTarget target, Vector3 worldPosition, bool hasWorldPosition, float moveDistance)
     {
         long replacedActionId = _actionId;
         double now = Time.timeAsDouble;
+
+        // 스킬과 이동 스킬 사용 시 기본 공격 콤보 단절
+        ResetBasicAttackCombo();
 
         _action = CombatActionKind.Skill;
         _actionTarget = target;
@@ -266,13 +292,14 @@ public sealed class CombatController : MonoBehaviour
         _actionDirection = direction;
         _actionWorldPosition = worldPosition;
         _actionHasWorldPosition = hasWorldPosition;
+        _actionMoveDistance = moveDistance;
 
         _actionId = ++_nextActionId;
         _actionStartedAt = now;
         _finishAt = now + skill.Definition.CastTime;
 
-        // 이동 스킬은 실제 이동 시작 성공 시 쿨타임 적용
-        if (!(skill.Definition is MovementSkillDefinition))
+        // 이동 단계가 있는 스킬은 실제 이동 시작 성공 시 쿨타임 적용
+        if (!(skill.Definition is ISkillMovementSettings))
             skill.BeginCooldown();
 
         CombatActionInfo started = CurrentAction;
@@ -296,7 +323,7 @@ public sealed class CombatController : MonoBehaviour
         return true;
     }
 
-    void BeginMovementExecution(MovementSkillDefinition definition)
+    void BeginMovementExecution(ISkillMovementSettings settings)
     {
         CombatActionInfo action = CurrentAction;
         SkillInstance skill = _castingSkill;
@@ -304,13 +331,14 @@ public sealed class CombatController : MonoBehaviour
 
         SkillExecutionContext execution = new SkillExecutionContext(_owner, skill, action);
 
-        if (_movementSource == null || !_movementSource.isActiveAndEnabled || !_movement.TryBeginSkillMovement(definition, action.Direction))
+        if (_movementSource == null || !_movementSource.isActiveAndEnabled || !_movement.TryBeginSkillMovement(settings, action.Direction, _actionMoveDistance))
         {
             CancelAction();
             return;
         }
 
         _movementExecuting = true;
+        _movementExecution = execution;
         skill.BeginCooldown();
 
         // 기존 사용 이펙트 경로 재사용
@@ -321,7 +349,7 @@ public sealed class CombatController : MonoBehaviour
 
         execution.PublishExecuted(action, origin);
 
-        if (_actionId == action.Id && definition.Mode == MovementSkillMode.Teleport)
+        if (_actionId == action.Id && settings.Mode == MovementSkillMode.Teleport)
             FinishMovementAction(action.Id);
     }
 
@@ -332,8 +360,13 @@ public sealed class CombatController : MonoBehaviour
 
         CombatActionInfo action = CurrentAction;
         Vector3 position = _owner.Position;
+        SkillExecutionContext execution = _movementExecution;
 
         ResetActionState();
+
+        // 취소·실패가 아닌 이동 완료 시에만 도착 위치 기준 범위 피해
+        if (action.Skill is DashStrikeSkillDefinition dashStrike)
+            SkillExecutor.ExecuteDashStrikeArrival(dashStrike, position, execution);
 
         OnMovementCompleted?.Invoke(action, position);
         OnActionEnded?.Invoke(action.Id, CombatActionResult.Completed);
@@ -376,6 +409,20 @@ public sealed class CombatController : MonoBehaviour
         return interval;
     }
 
+    float GetBasicAttackSpeedRate()
+    {
+        float attackSpeed = _owner.Status.AttackSpeed;
+        float baseAttackSpeed = _owner.Status.Definition.BaseAttackSpeed;
+
+        // 정의의 기본 공격속도 대비 현재 공격속도 비율
+        float rate = attackSpeed / baseAttackSpeed;
+
+        if (float.IsNaN(rate) || float.IsInfinity(rate) || rate <= 0f)
+            throw new InvalidOperationException($"{name}: 유효한 공격속도와 기본 공격속도 설정 필요");
+
+        return rate;
+    }
+
     void ResetActionState()
     {
         if (_movementExecuting)
@@ -394,9 +441,12 @@ public sealed class CombatController : MonoBehaviour
         _actionId = 0;
         _actionStartedAt = 0d;
         _finishAt = 0d;
+        _actionMotionClip = null;
 
         _actionWorldPosition = default;
         _actionHasWorldPosition = false;
+        _actionMoveDistance = 0f;
+        _movementExecution = null;
     }
 
     void CancelAction()
@@ -436,18 +486,19 @@ public sealed class CombatController : MonoBehaviour
         if (IsBusy)
             throw new InvalidOperationException($"{name}: 진행 중인 전투 행동 종료 후 고정 스킬 초기화 필요");
 
-        SkillInstance basicAttack = CreateBasicAttackInstance(definition.BasicAttackSkill);
+        if (definition.BasicAttackCombo == null)
+            throw new MissingReferenceException($"{definition.name}: 플레이어 기본 공격 콤보 연결 필요");
+
+        BasicAttackCombo basicAttackCombo = CreateBasicAttackCombo(definition.BasicAttackCombo);
 
         ICombatMovement movement = null;
         SkillInstance movementSkill = null;
 
         MovementSkillDefinition movementDefinition = definition.MovementSkill;
 
-        if (movementDefinition != null)
+        // 고정 이동 스킬과 슬롯 돌진 스킬이 함께 사용하는 이동 실행 연결
+        if (_movementSource != null)
         {
-            if (_movementSource == null)
-                throw new MissingReferenceException($"{name}: 이동 스킬을 실행할 Movement Source 연결 필요");
-
             if (!(_movementSource is ICombatMovement movementComponent))
                 throw new InvalidOperationException($"{name}: Movement Source에 ICombatMovement 구현 필요");
 
@@ -456,14 +507,21 @@ public sealed class CombatController : MonoBehaviour
             if (movementComponent.ActorTransform != actorTransform || !_movementSource.transform.IsChildOf(actorTransform))
                 throw new InvalidOperationException($"{name}: 같은 캐릭터 기준 Transform을 사용하는 이동 컴포넌트 연결 필요");
 
+            movement = movementComponent;
+        }
+
+        if (movementDefinition != null)
+        {
+            if (movement == null)
+                throw new MissingReferenceException($"{name}: 이동 스킬을 실행할 Movement Source 연결 필요");
+
             movementDefinition.Validate();
 
-            movement = movementComponent;
             movementSkill = new SkillInstance(movementDefinition);
         }
 
         // 필수 설정 검증과 인스턴스 생성 완료 후 상태 교체
-        _basicAttack = basicAttack;
+        _basicAttackCombo = basicAttackCombo;
         _movement = movement;
         _movementSkill = movementSkill;
 
@@ -489,23 +547,52 @@ public sealed class CombatController : MonoBehaviour
             return false;
 
         double now = Time.timeAsDouble;
+        bool combo = _basicAttackCombo != null && _basicAttackCombo.IsCombo;
+        double readyAt = combo ? _basicAttackCombo.NextAttackAt : _nextAttackAt;
 
-        if (now < _nextAttackAt)
+        if (now < readyAt)
             return false;
 
         if (CheckBasicAttackTarget(target) != AttackTargetState.Valid)
             return false;
 
-        float interval = GetBasicAttackInterval();
+        SkillInstance step = null;
+        AnimationClip motionClip = null;
+        float hitDelay;
 
-        float hitDelay = _basicAttack != null ? _basicAttack.Definition.CastTime : interval * _owner.Status.Definition.AttackPointRatio;
+        if (combo)
+        {
+            _basicAttackCombo.Begin(now);
+
+            // 콤보 단계는 스킬 CastTime 대신 단계 실행 지점 사용
+            // 모션과 실행 시점은 고정, 공격속도는 실행 완료 후 공백에만 반영
+            step = _basicAttackCombo.CurrentSkill;
+            motionClip = _basicAttackCombo.CurrentMotionClip;
+            hitDelay = _basicAttackCombo.CurrentExecuteTime;
+        }
+        else if (_basicAttackCombo != null)
+        {
+            // 단계 없는 단일 기본 공격, 다음 공격 시각은 실행 완료 시 공격속도 간격으로 갱신
+            step = _basicAttackCombo.Skill;
+            hitDelay = step.Definition.CastTime;
+        }
+        else
+        {
+            float interval = GetBasicAttackInterval();
+
+            hitDelay = interval * _owner.Status.Definition.AttackPointRatio;
+
+            // 기존 공격의 주기 제한만 유지
+            _nextAttackAt = now + interval;
+        }
 
         Vector3 direction = NormalizeDirection(target.Position - _owner.Position);
 
         _action = CombatActionKind.BasicAttack;
         _actionTarget = target;
-        _castingSkill = _basicAttack;
+        _castingSkill = step;
         _actionDirection = direction;
+        _actionMotionClip = motionClip;
 
         _actionWorldPosition = default;
         _actionHasWorldPosition = false;
@@ -513,10 +600,6 @@ public sealed class CombatController : MonoBehaviour
         _actionId = ++_nextActionId;
         _actionStartedAt = now;
         _finishAt = now + hitDelay;
-
-        // 기존 공격의 주기 제한만 유지
-        if (_basicAttack == null)
-            _nextAttackAt = now + interval;
 
         CombatActionInfo started = CurrentAction;
         OnActionChanged?.Invoke();
@@ -537,7 +620,7 @@ public sealed class CombatController : MonoBehaviour
         if (!isActiveAndEnabled || !_owner.IsAlive || IsCasting || Time.timeScale <= 0f)
             return false;
 
-        if (skill == null || !skill.IsReady || skill.IsBasicAttack || skill.Definition == BasicAttackDefinition)
+        if (skill == null || !skill.IsReady || skill.IsBasicAttack || _owner.Status.Definition.IsBasicAttackSkill(skill.Definition))
             return false;
 
         SkillExecutor.ValidateDefinition(skill.Definition);
@@ -559,7 +642,40 @@ public sealed class CombatController : MonoBehaviour
         Vector3 resolvedDirection = SkillAimResolver.Resolve(_owner, skill.Definition, acceptedRequest, out CombatTarget skillTarget);
         Vector3 direction = NormalizeDirection(resolvedDirection);
 
-        return BeginSkillAction(skill, direction, skillTarget, acceptedRequest.WorldPosition, acceptedRequest.HasWorldPosition);
+        float moveDistance = 0f;
+
+        if (skill.Definition is DashStrikeSkillDefinition dashStrike)
+        {
+            if (_movement == null)
+                throw new MissingReferenceException($"{name}: 돌진 스킬을 실행할 Movement Source 연결 필요");
+
+            if (!_movementSource.isActiveAndEnabled)
+                return false;
+
+            moveDistance = ResolveDashStrikeDistance(dashStrike, acceptedRequest);
+
+            // 시전과 기존 행동 교체 이전에 돌진 가능 여부 확인
+            if (!_movement.CanStartSkillMovement(dashStrike, direction, moveDistance))
+                return false;
+        }
+
+        return BeginSkillAction(skill, direction, skillTarget, acceptedRequest.WorldPosition, acceptedRequest.HasWorldPosition, moveDistance);
+    }
+
+    // 커서까지의 수평 거리를 최소·최대 거리로 제한, 커서 좌표가 없으면 최대 거리
+    float ResolveDashStrikeDistance(DashStrikeSkillDefinition definition, SkillAimRequest request)
+    {
+        if (!request.HasWorldPosition)
+            return definition.Distance;
+
+        Vector3 offset = request.WorldPosition - _owner.Position;
+        offset.y = 0f;
+        float distance = offset.magnitude;
+
+        if (float.IsNaN(distance) || float.IsInfinity(distance))
+            throw new ArgumentException("유한한 지정 좌표 필요", nameof(request));
+
+        return Mathf.Clamp(distance, definition.MinDistance, definition.Distance);
     }
 
     /// <summary>조준 요청을 해석한 뒤 일반 스킬 시전 시작</summary>
@@ -620,23 +736,29 @@ public sealed class CombatController : MonoBehaviour
         Vector3 direction = NormalizeDirection(requestedDirection);
 
         // 시전과 기존 행동 교체 이전에 이동 가능 여부 확인
-        if (!_movement.CanStartSkillMovement(definition, direction))
+        if (!_movement.CanStartSkillMovement(definition, direction, definition.Distance))
             return false;
 
-        return BeginSkillAction(_movementSkill, direction, null, default, false);
+        return BeginSkillAction(_movementSkill, direction, null, default, false, definition.Distance);
     }
 
     /// <summary>
-    /// 진행 중인 이동 스킬의 시전 또는 이동 취소
+    /// 진행 중인 이동 스킬·돌진 스킬의 시전 또는 이동 취소
     /// </summary>
     public void CancelMovementSkill()
     {
-        if (_castingSkill != null && _castingSkill.Definition is MovementSkillDefinition)
+        if (_castingSkill != null && _castingSkill.Definition is ISkillMovementSettings)
             CancelAction();
     }
 
+    /// <summary>
+    /// 진행 중인 기본 공격 취소와 콤보 단절
+    /// </summary>
+    // 이동 요청과 대상 상실 시마다 호출되므로 타격 이후 후딜레이 이동도 콤보 단절로 처리
     public void CancelBasicAttack()
     {
+        ResetBasicAttackCombo();
+
         if (_action == CombatActionKind.BasicAttack)
             CancelAction();
     }
@@ -651,7 +773,7 @@ public sealed class CombatController : MonoBehaviour
 
         SkillDefinition preview = IsBusy
             ? (_castingSkill != null ? _castingSkill.Definition : null)
-            : (_previewSkill != null ? _previewSkill : BasicAttackDefinition);
+            : (_previewSkill != null ? _previewSkill : (BasicAttackComboDefinition != null ? BasicAttackComboDefinition.Skill : null));
 
         bool basicPreview = IsBusy
             ? _action == CombatActionKind.BasicAttack

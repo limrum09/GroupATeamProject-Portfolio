@@ -172,19 +172,23 @@ public class DamageTextController : MonoBehaviour
             NormalColor = normalColor,
             CriticalColor = criticalColor
         };
-        binding.Damaged = (request, applied) => HandleDamaged(binding, request, applied);
+        binding.Damaged = (request, amount) => HandleDamaged(binding, request, amount);
 
         binding.Healed = restored => ShowNumber(binding, restored, false, _healingColor);
 
         _bindings.Add(target, binding);
-        target.OnDamaged += binding.Damaged;
+        if (target.Team == CombatTeam.Enemy)
+            target.OnDamageResolved += binding.Damaged;
+        else
+            target.OnDamaged += binding.Damaged;
+
         binding.Status.OnHealed += binding.Healed;
     }
 
-    void HandleDamaged(DamageBinding binding, DamageRequest request, float applied)
+    void HandleDamaged(DamageBinding binding, DamageRequest request, float amount)
     {
         Color color = request.IsCritical ? binding.CriticalColor : binding.NormalColor;
-        ShowNumber(binding, applied, request.IsCritical, color, true);
+        ShowNumber(binding, amount, request.IsCritical, color, true);
     }
 
     bool CanShow(CombatTeam team)
@@ -325,7 +329,12 @@ public class DamageTextController : MonoBehaviour
     static void Unsubscribe(DamageBinding binding)
     {
         if (binding.Target != null)
-            binding.Target.OnDamaged -= binding.Damaged;
+        {
+            if (binding.Target.Team == CombatTeam.Enemy)
+                binding.Target.OnDamageResolved -= binding.Damaged;
+            else
+                binding.Target.OnDamaged -= binding.Damaged;
+        }
 
         if (binding.Status != null)
             binding.Status.OnHealed -= binding.Healed;

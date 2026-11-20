@@ -56,7 +56,6 @@ public class GameFlowController : MonoBehaviour
     public RunLevelProgression CurrentRun => _runProgression;
     public RunStartRequest StartRequest => _startRequest;
     public RunSettlementResult LastScoreResult { get; private set; }
-    public RunSettlementRelay SettlementRelay { get; private set; }
     public RunSettlementView SettlementView => _settlementView;
     public bool HasSceneStarted => _sceneStarted;
     public bool IsEndRequested => _phase == RunPhase.EndRequested;
@@ -69,7 +68,6 @@ public class GameFlowController : MonoBehaviour
     void Awake()
     {
         ValidateSceneReferences();
-        SettlementRelay = new RunSettlementRelay(this);
 
         _sessionInitializer.InitializeForScene();
         _playerActor.DisableControl();
@@ -93,7 +91,6 @@ public class GameFlowController : MonoBehaviour
 
     void OnDestroy()
     {
-        SettlementRelay?.Dispose();
         StopAbnormally();
     }
 

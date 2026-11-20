@@ -18,6 +18,11 @@ public sealed class CombatTarget : MonoBehaviour, IDamageReceiver
     /// </summary>
     public event Action<DamageRequest, float> OnDamaged;
 
+    /// <summary>
+    /// 적중한 공격 정보와 남은 체력에 따른 제한 적용 전 최종 피해량 전달
+    /// </summary>
+    public event Action<DamageRequest, float> OnDamageResolved;
+
     public CombatTeam Team => _team;
     public CharacterStatus Status => _status;
     public Transform ActorTransform => _actorTransform;
@@ -110,6 +115,8 @@ public sealed class CombatTarget : MonoBehaviour, IDamageReceiver
 
         float applied = _status.ApplyDamage(damage);
         OnDamaged?.Invoke(request, applied);
+        if (applied > 0f)
+            OnDamageResolved?.Invoke(request, damage);
 
         return true;
     }

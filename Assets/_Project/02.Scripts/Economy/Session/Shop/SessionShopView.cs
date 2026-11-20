@@ -245,6 +245,7 @@ public sealed class SessionShopView : MonoBehaviour
     void RefreshDetails()
     {
         SkillDefinition definition = null;
+        int level = 1;
         bool productSelected = _selectedProduct >= 0 && _selectedProduct < _purchases.Products.Count;
         if (productSelected)
         {
@@ -256,6 +257,7 @@ public sealed class SessionShopView : MonoBehaviour
                  _selectedOwnedSkill != null)
         {
             definition = _selectedOwnedSkill.Definition;
+            level = _selectedOwnedSkill.Level;
             _detailPrice.text = _purchases.TryGetSalePrice(_selectedSlot, _selectedOwnedSkill, out float price) ?
                 $"판매 가격 {price:0.##}" : "판매 불가";
         }
@@ -278,8 +280,8 @@ public sealed class SessionShopView : MonoBehaviour
         if (definition == null) return;
         _detailIcon.sprite = definition.SkillIcon;
         _detailIcon.enabled = definition.SkillIcon != null;
-        _detailName.text = definition.SkillName;
-        _detailDescription.text = definition.SkillDescription;
+        _detailName.text = SkillDescriptionFormatter.FormatTitle(definition, level);
+        _detailDescription.text = SkillDescriptionFormatter.FormatDescription(definition, level);
     }
 
     void HandlePurchase()

@@ -418,20 +418,18 @@ public class WorldGraphGenerator
     }
 
     WorldGraphGenerationResult CreateResult(WorldGraphGenerationSettings settings, int seed,
-        System.Random random, List<Vector2Int> coordinates, List<List<int>> connections,
-        List<int> mainRoute, int bossNodeId)
+        List<Vector2Int> coordinates, List<List<int>> connections, List<int> mainRoute,
+        int bossNodeId, int shopNodeId, int[] distances)
     {
-        int[] distances = CalculateDistances(connections, 0);
         ValidateTopology(settings, coordinates, connections, bossNodeId, distances);
         Vector2[] positions = CreateLayout(settings, seed, coordinates, connections);
-        int mainShopId = mainRoute[random.Next(1, mainRoute.Count - 1)];
-        int branchShopId = random.Next(mainRoute.Count, coordinates.Count);
         List<WorldGraphNodeData> nodes = new List<WorldGraphNodeData>();
+
         for (int id = 0; id < coordinates.Count; id++)
         {
             MapBindings.MapType type = id == 0 ? MapBindings.MapType.Start :
                 id == bossNodeId ? MapBindings.MapType.Boss :
-                id == mainShopId || id == branchShopId ? MapBindings.MapType.Shop : MapBindings.MapType.Combat;
+                id == shopNodeId ? MapBindings.MapType.Shop : MapBindings.MapType.Combat;
             nodes.Add(new WorldGraphNodeData(coordinates[id], positions[id], distances[id], type));
         }
         return new WorldGraphGenerationResult(nodes, connections, mainRoute, 0, bossNodeId);
@@ -470,7 +468,22 @@ public class WorldGraphGenerator
             if (!TryLimitConnectionCounts(settings, random, coordinates, connections, bossNodeId))
                 continue;
 
-            return CreateResult(settings, attemptSeed, random, coordinates, connections, mainRoute, bossNodeId);
+            const int minimumShopDistance = 3;
+            int[] distances = CalculateDistances(connections, 0);
+            List<int> shopCandidates = new List<int>();
+            for (int id = 1; id < distances.Length; id++)
+            {
+                // 보스는 연결이 하나인 끝 노드이므로 다른 노드로 가는 경로에 포함되지 않음
+                if (id != bossNodeId && distances[id] >= minimumShopDistance)
+                    shopCandidates.Add(id);
+            }
+
+            if (shopCandidates.Count == 0)
+                continue;
+
+            int shopNodeId = shopCandidates[random.Next(shopCandidates.Count)];
+            return CreateResult(settings, attemptSeed, coordinates, connections, mainRoute,
+                bossNodeId, shopNodeId, distances);
         }
 
         throw new InvalidOperationException(

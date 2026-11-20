@@ -18,7 +18,7 @@ public class EnemySpawnManager : MonoBehaviour
 
     // 사망 연출 종료를 기다리는 적의 이벤트 구독 관리
     // Key: 사망 연출 대기 중인 Enemy 인스턴스
-    // Value: 구독 해제에 사용할 사망 애니메이션 종료 콜백
+    // Value: 구독 해제에 사용할 사망 연출 종료 콜백
     readonly Dictionary<Enemy, Action> _pendingReturns =
         new Dictionary<Enemy, Action>();
 
@@ -89,7 +89,7 @@ public class EnemySpawnManager : MonoBehaviour
 
                     if (_pendingReturns.TryGetValue(enemy, out Action ended))
                     {
-                        enemy.OnDeathAnimationEnded -= ended;
+                        enemy.OnDeathPresentationEnded -= ended;
                         _pendingReturns.Remove(enemy);
                     }
 
@@ -152,20 +152,20 @@ public class EnemySpawnManager : MonoBehaviour
         _enemies.Remove(enemy);
 
         // AI 사망 처리와의 구독 순서에 관계없이 반환 대기 등록
-        Action endHandler = () => HandleDeathAnimationEnded(enemy);
+        Action endHandler = () => HandleDeathPresentationEnded(enemy);
         _pendingReturns.Add(enemy, endHandler);
-        enemy.OnDeathAnimationEnded += endHandler;
+        enemy.OnDeathPresentationEnded += endHandler;
 
         // 처치 결과는 즉시 전달하고 실제 반환은 연출 종료까지 대기
         OnEnemyDied?.Invoke(enemy);
     }
 
-    void HandleDeathAnimationEnded(Enemy enemy)
+    void HandleDeathPresentationEnded(Enemy enemy)
     {
         if (_pendingReturns.TryGetValue(enemy, out Action handler) == false)
             return;
 
-        enemy.OnDeathAnimationEnded -= handler;
+        enemy.OnDeathPresentationEnded -= handler;
         _pendingReturns.Remove(enemy);
         enemy.CombatTarget.OnDamaged -= HandleEnemyDamaged;
         _enemySpawner.Release(enemy);
@@ -202,7 +202,7 @@ public class EnemySpawnManager : MonoBehaviour
 
         foreach (KeyValuePair<Enemy, Action> entry in _pendingReturns)
         {
-            entry.Key.OnDeathAnimationEnded -= entry.Value;
+            entry.Key.OnDeathPresentationEnded -= entry.Value;
             enemies.Add(entry.Key);
         }
 

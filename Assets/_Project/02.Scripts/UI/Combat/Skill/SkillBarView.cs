@@ -32,9 +32,11 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
     public event Action OnSlotDragEnded;
     public event Action<int> OnSlotUpgradeRequested;
     public event Action<FixedSkillSlotKind, bool> OnFixedSlotHoverChanged;
+    public event Action<bool> OnUpgradeModeChanged;
 
     public int SlotCount => _slots.Length;
     public bool ShowsFixedSkills => _showFixedSkills;
+    public bool IsUpgradeMode => _upgradeMode;
 
     public FixedSkillSlotKind HoveredFixedSlot
     {
@@ -64,9 +66,8 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
         {
             for (int i = 0; i < _slots.Length; i++)
             {
-                SkillIconHover hover = _slots[i].HoverTarget;
-
-                if (hover.isActiveAndEnabled && hover.IsHovered)
+                SkillSlotView slot = _slots[i];
+                if (_upgradeMode ? slot.IsPointerInside : slot.HoverTarget.IsHovered)
                     return i;
             }
 
@@ -120,6 +121,7 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
         foreach (SkillSlotView slot in _slots)
         {
             slot.HoverTarget.OnHoverChanged += HandleHoverChanged;
+            slot.OnSlotHoverChanged += HandleUpgradeHoverChanged;
             slot.OnUpgradeRequested += HandleUpgradeRequested;
 
             SkillSlotDragInput input = slot.DragInput;
@@ -128,12 +130,12 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
             input.OnDragged += HandleDragged;
             input.OnDragReleased += HandleDragReleased;
             input.OnDragCanceled += HandleDragCanceled;
+        }
 
-            if (_showFixedSkills)
-            {
-                _basicAttackSlot.HoverTarget.OnHoverChanged += HandleFixedHoverChanged;
-                _movementSkillSlot.HoverTarget.OnHoverChanged += HandleFixedHoverChanged;
-            }
+        if (_showFixedSkills)
+        {
+            _basicAttackSlot.HoverTarget.OnHoverChanged += HandleFixedHoverChanged;
+            _movementSkillSlot.HoverTarget.OnHoverChanged += HandleFixedHoverChanged;
         }
     }
 
@@ -146,6 +148,7 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
                 continue;
 
             slot.OnUpgradeRequested -= HandleUpgradeRequested;
+            slot.OnSlotHoverChanged -= HandleUpgradeHoverChanged;
 
             SkillIconHover hover = slot.HoverTarget;
 
@@ -191,6 +194,8 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
 
     void HandleHoverChanged(SkillIconHover source, bool hovered)
     {
+        if (_upgradeMode) return;
+
         for(int i = 0; i < _slots.Length; i++)
         {
             if (_slots[i].HoverTarget == source)
@@ -201,6 +206,17 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
         }
 
         throw new InvalidOperationException($"{name}: 등록되지 않은 Hover 영역");
+    }
+
+    void HandleUpgradeHoverChanged(SkillSlotView slot, bool hovered)
+    {
+        if (!_upgradeMode) return;
+
+        int index = Array.IndexOf(_slots, slot);
+        if (index < 0)
+            throw new InvalidOperationException($"{name}: 등록되지 않은 강화 슬롯");
+
+        OnSlotHoverChanged?.Invoke(index, hovered);
     }
 
     void HandleDragStarted(SkillSlotDragInput source, PointerEventData eventData)
@@ -420,9 +436,10 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
     /// <param name="skillName">스킬 이름</param>
     /// <param name="level">현재 레벨</param>
     /// <param name="description">설명</param>
-    public void ShowTooltip(string skillName, int level, string description)
+    /// <param name="mode">현재 레벨 또는 강화 단계 표시 방식</param>
+    public void ShowTooltip(string skillName, int level, string description, SkillTooltipMode mode = SkillTooltipMode.Current)
     {
-        _tooltip.Show(skillName, level, description);
+        _tooltip.Show(skillName, level, description, mode);
     }
 
     /// <summary>공용 툴팁 숨김</summary>
@@ -446,7 +463,7 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
     }
 
     /// <summary>
-    /// 드래그 취소와 전체 슬롯의 강화 모드 변경
+    /// 드래그 취소와 전체 슬롯의 강화 모드 변경 및 상태 알림
     /// </summary>
     /// <param name="enabled">강화 모드 여부</param>
     public void SetUpgradeMode(bool enabled)
@@ -460,10 +477,7 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
         _upgradeMode = enabled;
 
         if (enabled)
-        {
             CancelDrag();
-            HideTooltip();
-        }
 
         foreach (SkillSlotView slot in _slots)
         {
@@ -471,6 +485,9 @@ public sealed class SkillBarView : MonoBehaviour, ISkillBarView
             if (slot != null)
                 slot.SetUpgradeMode(enabled);
         }
+
+        // 전체 슬롯의 표시 반영 이후 상태 변경 알림
+        OnUpgradeModeChanged?.Invoke(enabled);
     }
 
     /// <summary>

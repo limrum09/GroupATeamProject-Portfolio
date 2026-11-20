@@ -20,8 +20,8 @@ public class CharacterDefinition : ScriptableObject
     [Tooltip("공격 주기 중 타격이 발생하는 시점. 0.3이면 30% 지점")]
     [SerializeField, Range(0f, 1f)] float _attackPointRatio = 1f / 3f;
 
-    [Header("----- 고정 기본 공격 -----")]
-    [SerializeField] TargetDamageSkillDefinition _basicAttackSkill;
+    [Header("----- 고정 기본 공격 콤보 -----")]
+    [SerializeField] BasicAttackComboDefinition _basicAttackCombo;
 
     public float MaxHealth => _maxHealth;
     public float AttackPower => _attackPower;
@@ -33,7 +33,17 @@ public class CharacterDefinition : ScriptableObject
     public float CriticalDamageMultiplier => _criticalDamageMultiplier;
     public float AttackRange => _attackRange;
     public float AttackPointRatio => _attackPointRatio;
-    public TargetDamageSkillDefinition BasicAttackSkill => _basicAttackSkill;
+    public BasicAttackComboDefinition BasicAttackCombo => _basicAttackCombo;
+
+    /// <summary>
+    /// 지정 스킬의 고정 기본 공격 콤보 포함 여부
+    /// </summary>
+    /// <param name="skill">확인할 스킬 정의</param>
+    /// <returns>콤보의 어느 단계에 포함되면 true</returns>
+    public bool IsBasicAttackSkill(SkillDefinition skill)
+    {
+        return _basicAttackCombo != null && _basicAttackCombo.Contains(skill);
+    }
 
     void OnValidate()
     {

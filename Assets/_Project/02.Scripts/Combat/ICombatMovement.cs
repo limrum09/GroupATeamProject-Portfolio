@@ -23,18 +23,20 @@ public interface ICombatMovement
     /// <summary>
     /// 위치 변경 없이 이동 시작 가능 여부 검사
     /// </summary>
-    /// <param name="definition">이동 설정</param>
+    /// <param name="settings">이동 설정</param>
     /// <param name="direction">정규화된 수평 이동 방향</param>
+    /// <param name="distance">이번 이동의 목표 거리</param>
     /// <returns>이동 가능한 구간 존재 여부</returns>
-    bool CanStartSkillMovement(MovementSkillDefinition definition, Vector3 direction);
+    bool CanStartSkillMovement(ISkillMovementSettings settings, Vector3 direction, float distance);
 
     /// <summary>
     /// 이동 경로 재검사 후 승인된 이동 시작
     /// </summary>
-    /// <param name="definition">이동 설정</param>
+    /// <param name="settings">이동 설정</param>
     /// <param name="direction">정규화된 수평 이동 방향</param>
+    /// <param name="distance">이번 이동의 목표 거리</param>
     /// <returns>이동 시작 성공 여부</returns>
-    bool TryBeginSkillMovement(MovementSkillDefinition definition, Vector3 direction);
+    bool TryBeginSkillMovement(ISkillMovementSettings settings, Vector3 direction, float distance);
 
     /// <summary>
     /// 진행 중인 이동의 프레임 처리

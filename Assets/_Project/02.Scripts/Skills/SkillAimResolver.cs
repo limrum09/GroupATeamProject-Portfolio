@@ -20,6 +20,12 @@ internal static class SkillAimResolver
         if (definition.AimMode == SkillAimMode.SelectedTarget && definition.TargetMode == SkillTargetMode.None)
             throw new InvalidOperationException($"{definition.name}: SelectedTarget 사용 시 대상 선택 방식 설정 필요");
 
+        if (definition is RandomAreaDamageSkillDefinition { IgnoreTargetDistance: true } randomArea &&
+            (!randomArea.CenterOnTarget || definition.TargetMode != SkillTargetMode.PreferAttackTargetThenNearest))
+        {
+            throw new InvalidOperationException($"{definition.name}: 거리 검사 생략에는 지정 대상 주변의 무작위 배치 필요");
+        }
+
         if (definition.TargetMode != SkillTargetMode.None)
         {
             if (float.IsNaN(definition.Range) || float.IsInfinity(definition.Range) || definition.Range <= 0f)
@@ -44,7 +50,15 @@ internal static class SkillAimResolver
                 target = null;
                 break;
             case SkillTargetMode.PreferAttackTargetThenNearest:
-                target = CombatHitQuery.FindPreferredOrNearestTarget(source, request.PreferredTarget, definition.Range, definition.TargetMask);
+                if (definition is RandomAreaDamageSkillDefinition { IgnoreTargetDistance: true })
+                {
+                    CombatTarget preferred = request.PreferredTarget;
+                    target = preferred != null && preferred.CanReceiveFrom(source) ? preferred : null;
+                }
+                else
+                {
+                    target = CombatHitQuery.FindPreferredOrNearestTarget(source, request.PreferredTarget, definition.Range, definition.TargetMask);
+                }
                 break;
             default:
                 throw new InvalidOperationException($"{definition.name}: 지원하지 않는 대상 선택 방식");

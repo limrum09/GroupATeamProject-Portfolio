@@ -280,6 +280,10 @@ public class MetaProgression
         if (upgradeId != null && !IsEquipSlotUnlocked(characterId, slotIndex))
             return MetaEquipStatus.SlotLocked;
 
+        // 기존 장착 기록은 유지하고 통합 레벨 미달 강화의 신규 장착만 거절
+        if (upgradeId != null && !GetUpgrade(characterId, upgradeId).IsUnlockedAt(IntegratedMasteryLevel))
+            return MetaEquipStatus.Unavailable;
+
         List<string> slots = new List<string>(current);
         slots[slotIndex] = upgradeId;
 
@@ -435,6 +439,48 @@ public class MetaProgression
         GetCharacter(characterId);
 
         return _masteryExperience.TryGetValue(characterId, out long experience) ? experience : 0;
+    }
+
+    /// <summary>
+    /// 상태 변경 없이 숙련도 경험치 추가 후 누적값 검증
+    /// </summary>
+    /// <param name="characterId">경험치를 받을 캐릭터 식별자</param>
+    /// <param name="amount">추가할 숙련도 경험치</param>
+    /// <param name="experience">검증된 캐릭터 누적 경험치 후보</param>
+    /// <returns>캐릭터와 통합 누적값의 표현 범위 내 반영 가능 여부</returns>
+    public bool TryPrepareMasteryExperience(string characterId, long amount, out long experience)
+    {
+        if (amount < 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "0 이상의 숙련도 경험치 필요");
+
+        experience = GetMasteryExperience(characterId);
+
+        // 통합 누적값이 캐릭터 누적값 이상이므로 통합 범위 검사로 두 범위 모두 확인
+        if (amount > long.MaxValue - IntegratedMasteryExperience)
+            return false;
+
+        experience += amount;
+        return true;
+    }
+
+    /// <summary>
+    /// 검증된 캐릭터 누적 숙련도 경험치 반영
+    /// </summary>
+    /// <param name="characterId">경험치를 받을 캐릭터 식별자</param>
+    /// <param name="experience">TryPrepareMasteryExperience로 검증한 누적 경험치</param>
+    public void ApplyPreparedMasteryExperience(string characterId, long experience)
+    {
+        long current = GetMasteryExperience(characterId);
+
+        if (experience < current)
+            throw new InvalidOperationException("숙련도 경험치 감소 반영 불가");
+
+        // 준비 이후 다른 반영이 있었을 경우의 통합 범위 재검사
+        _ = checked(IntegratedMasteryExperience - current + experience);
+
+        _masteryExperience[characterId] = experience;
+
+        // 외부 알림은 정산 조율 담당에서 수행
     }
 
     /// <summary>

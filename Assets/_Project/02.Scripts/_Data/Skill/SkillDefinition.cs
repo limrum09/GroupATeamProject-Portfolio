@@ -85,8 +85,7 @@ public abstract class SkillDefinition : ScriptableObject
     [SerializeField] SkillCategory _category = SkillCategory.Public;
 
     [Header("----- 레벨별 성장 -----")]
-    [SerializeField]
-    SkillLevelGrowth[] _levelGrowth = Array.Empty<SkillLevelGrowth>();
+    [SerializeField] SkillLevelGrowth[] _levelGrowth = Array.Empty<SkillLevelGrowth>();
 
     [Header("----- 사용 시간 -----")]
     [SerializeField, Min(0f)] float _castTime = 0.5f;
@@ -115,6 +114,7 @@ public abstract class SkillDefinition : ScriptableObject
 
     [Header("----- 이펙트 기준점 -----")]
     [SerializeField] Vector3 _effectOffset;
+    [SerializeField] Vector3 _hitEffectOffset;
 
     public string SkillUID => _skillUID;
     public float CastTime => _castTime;
@@ -131,10 +131,22 @@ public abstract class SkillDefinition : ScriptableObject
     public Vector3 UseEffectRotation => _useEffectRotation;
     public Vector3 HitEffectRotation => _hitEffectRotation;
     public Vector3 EffectOffset => _effectOffset;
+    // 공격 방향 기준 로컬 피격 이펙트 위치 보정 (z+ 공격 방향, x+ 오른쪽)
+    public Vector3 HitEffectOffset => _hitEffectOffset;
     public int MaxLevel => _levelGrowth.Length + 1;
     public Sprite SkillIcon => _icon;
     public string SkillName => _skillName;
     public string SkillDescription => _skillDescription;
+
+    /// <summary>
+    /// 지정 레벨의 누적 감소량을 반영한 재사용 시간
+    /// </summary>
+    /// <param name="level">조회할 스킬 레벨</param>
+    /// <returns>다음 사용에 적용할 재사용 시간</returns>
+    public float GetCooldown(int level)
+    {
+        return Mathf.Max(0f, Cooldown - GetGrowth(level).CooldownReduction);
+    }
 
     protected virtual void OnValidate()
     {

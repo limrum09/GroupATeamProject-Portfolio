@@ -38,11 +38,13 @@ public class EnemyAI : MonoBehaviour
     Transform _target;	// 감지할 플레이어 참조
     CombatTarget _attackTarget;	// 이번 소환의 공격 대상
     CombatTarget _owner;	// 이 AI를 소유한 적의 전투 대상
+    Collider _contactCollider;	// 이번 소환의 모델 접촉 Collider
     Vector3 _spawnPosition;	// 이번 소환의 최초 배치 위치
     bool _returnToSpawnRequired;	// 추적 종료 후 소환 위치 복귀 필요 여부
     bool _initialized;	// 이번 소환의 대상과 상태 초기화 여부
     bool _subscribed;	// 전투·애니메이션 이벤트 구독 여부
 
+    public event Action OnDeathAnimationStarted;
     public event Action OnDeathAnimationEnded;
     public EnemyState CurrentState { get; private set; }
     public bool IsInitialized => _initialized;
@@ -96,7 +98,11 @@ public class EnemyAI : MonoBehaviour
 
         // 돌진 완료·접촉 결과를 반영한 뒤 일반 이동과 상태 판단 갱신
         _enemyAttack.TickExecution(Time.deltaTime);
-        _enemyMovement.Tick();
+        Vector3? facingTarget = null;
+        if (CurrentState == EnemyState.Confrontation && TryGetTargetPosition(out Vector3 targetPosition))
+            facingTarget = targetPosition;
+
+        _enemyMovement.Tick(facingTarget);
         _currentState.Update();
         _enemyAnimation.SetAnimMove(_enemyMovement.CurrentSpeed, _enemyMovement.TrackingSpeed);
     }
@@ -138,8 +144,15 @@ public class EnemyAI : MonoBehaviour
 
         // 비활성 상태에서 이동 기능 초기화
         _enemyMovement.Init();
+        _contactCollider = model.ContactCollider;
         _enemyAttack.Init(
-            model.Definition, _enemyMovement, model.ContactCollider, effectPlayer);
+            model.Definition, _enemyMovement, _contactCollider, effectPlayer);
+
+        EnemyAttackVfxPresenter attackVfx = model.AttackVfxPresenter;
+        if (attackVfx != null)
+        {
+            attackVfx.Bind(_combatCtr, model.Animator, _enemyAttack);
+        }
 
         // 이번 소환의 감지 대상과 전투 소유자 연결
         _target = playerTarget.ActorTransform;
@@ -194,6 +207,7 @@ public class EnemyAI : MonoBehaviour
         _target = null;
         _attackTarget = null;
         _owner = null;
+        _contactCollider = null;
         _spawnPosition = Vector3.zero;
         _returnToSpawnRequired = false;
         _initialized = false;
@@ -267,11 +281,13 @@ public class EnemyAI : MonoBehaviour
         _enemyAttack.StopAttack();
     }
 
-    /// <summary>공격과 사망 상태를 제외한 피격 전환</summary>
+    /// <summary>
+    /// 공격 실행 중이거나 피격·사망 상태일 때 제외하는 피격 전환
+    /// </summary>
     public void TakeHit()
     {
         if (_initialized == false || isActiveAndEnabled == false || _owner.IsAlive == false) return;
-        if (CurrentState == EnemyState.Attack ||
+        if (_enemyAttack.IsAttackInProgress ||
             CurrentState == EnemyState.Hit || CurrentState == EnemyState.Dead)
         {
             return;
@@ -291,9 +307,15 @@ public class EnemyAI : MonoBehaviour
             return;
         }
 
-        // 이전 상태 종료와 진행 중인 이동 취소
+        // 공격 사거리까지 접근할 때 기존 추적 경로와 속도 유지
+        bool keepTrackingMove = _currentState != null &&
+            CurrentState == EnemyState.Tracking &&
+            nextState == EnemyState.Attack &&
+            GetAttackDecision() == EnemyAttackDecision.Approach;
+
         _currentState?.Exit();
-        _enemyMovement.Stop();
+        if (!keepTrackingMove)
+            _enemyMovement.Stop();
 
         // 전투 재개 또는 사망 시 기존 복귀 요청 취소
         if (nextState == EnemyState.Tracking ||
@@ -419,10 +441,17 @@ public class EnemyAI : MonoBehaviour
         _enemyAnimation.CancelHit();
     }
 
-    /// <summary>사망 애니메이션 시작 요청</summary>
+    /// <summary>
+    /// 사망 상태의 접촉·회피 해제와 사망 애니메이션 시작 요청
+    /// </summary>
     public void BeginDeath()
     {
+        if (_contactCollider != null)
+            _contactCollider.enabled = false;
+
+        _enemyMovement.DisableNavigationOnDeath();
         _enemyAnimation.SetAnimDie();
+        OnDeathAnimationStarted?.Invoke();
     }
 
     /// <summary>사망 애니메이션 종료 알림 대기 취소</summary>
@@ -441,8 +470,8 @@ public class EnemyAI : MonoBehaviour
 
     void HandleDamaged(DamageRequest request, float appliedDamage)
     {
-        // 피해량 0을 포함한 피격 알림 처리
-        TakeHit();
+        if (appliedDamage >= _owner.Status.MaxHealth * 0.2f)
+            TakeHit();
     }
 
     void HandleDied()

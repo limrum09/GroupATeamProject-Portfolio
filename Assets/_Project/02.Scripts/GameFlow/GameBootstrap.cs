@@ -76,7 +76,7 @@ public class GameBootstrap : MonoBehaviour
             _googleSignIn = new GoogleDesktopSignIn(_googleClientId, _googleClientSecret);
 
             _ready = true;
-            StatusMessage = "Google 로그인 버튼을 눌러주세요.";
+            StatusMessage = string.Empty;
         }
         catch (OperationCanceledException) when (_lifetimeToken.IsCancellationRequested)
         {
@@ -130,7 +130,7 @@ public class GameBootstrap : MonoBehaviour
             return;
 
         _busy = true;
-        StatusMessage = "로그인 및 게임 데이터 준비 중...";
+        StatusMessage = string.Empty;
 
         _previousRunInBackground = Application.runInBackground;
         _backgroundOverridden = true;
@@ -150,18 +150,16 @@ public class GameBootstrap : MonoBehaviour
 
             _lifetimeToken.ThrowIfCancellationRequested();
 
-            bool initialized = await _sceneFlow.EnsureInitializedAsync(retryFailed: true, userId: user.UserId);
+            // 프로필 준비부터 로비 준비 완료까지 SceneFlow의 로딩 화면 표시
+            bool entered = await _sceneFlow.EnterMetaSceneAsync(user.UserId);
 
             _lifetimeToken.ThrowIfCancellationRequested();
 
-            if (!initialized)
+            if (!entered)
                 throw new InvalidOperationException("사용자 프로필 준비 실패. Console의 초기화 오류 확인 필요");
 
-            if (!_sceneFlow.TryReturnToMetaScene())
-                throw new InvalidOperationException("현재 로비 전환 요청을 받을 수 없는 상태");
-
             _lobbyRequested = true;
-            StatusMessage = "로비로 이동 중...";
+            StatusMessage = string.Empty;
         }
         catch (OperationCanceledException) when (_lifetimeToken.IsCancellationRequested)
         {

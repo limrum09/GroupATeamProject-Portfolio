@@ -125,10 +125,10 @@ public class WorldPortal : MonoBehaviour, IInteractable
     }
 
     /// <summary>
-    /// 접근 조건 재검사 후 일반 지도 또는 보스의 다음 월드 확인창 요청
+    /// 포탈 접근 조건 재검사 후 지도 표시, 다음 월드 확인 또는 런 종료 요청
     /// </summary>
     /// <param name="actor">상호작용을 요청한 플레이어의 스킬 구성</param>
-    /// <returns>이동 화면 열기 요청 성공 여부</returns>
+    /// <returns>지도 표시, 다음 월드 확인 또는 런 종료 요청 접수 여부</returns>
     public bool TryInteract(SkillLoadout actor)
     {
         if (!CanInteract(actor))
@@ -136,11 +136,9 @@ public class WorldPortal : MonoBehaviour, IInteractable
 
         if (_sessionProgress.Progress.CurrentNodeId == _sessionProgress.Graph.BossNodeId)
         {
-            if (_sessionProgress.CanRequestRunClear())
-            {
-                _sessionUi.OpenRunClear(this, actor);
+            if (_sessionProgress.TryRequestRunClear())
                 return true;
-            }
+
             if (!_sessionProgress.CanEnterNextWorld())
                 return false;
 

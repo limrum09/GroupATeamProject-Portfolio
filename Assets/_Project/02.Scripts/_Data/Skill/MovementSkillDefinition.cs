@@ -14,7 +14,7 @@ public enum MovementSkillMode
 /// 캐릭터 고정 이동 스킬의 설정 데이터
 /// </summary>
 [CreateAssetMenu(menuName = "Project/Skills/Movement Skill", fileName = "_MovementSkill")]
-public sealed class MovementSkillDefinition : SkillDefinition
+public sealed class MovementSkillDefinition : SkillDefinition, ISkillMovementSettings
 {
     [Header("----- 이동 설정 -----")]
     [SerializeField] MovementSkillMode _mode;

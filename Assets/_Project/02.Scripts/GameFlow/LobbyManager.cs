@@ -36,7 +36,8 @@ public sealed class LobbyManager : MonoBehaviour
 
     public event Action OnChanged;
 
-    const MetaSavePart QuestSaveParts = MetaSavePart.DailyQuests | MetaSavePart.MetaGold;
+    // 런 정산 저장에 함께 포함되는 퀘스트 결과, 메타 재화, 숙련도 범위
+    const MetaSavePart QuestSaveParts = MetaSavePart.DailyQuests | MetaSavePart.MetaGold | MetaSavePart.Mastery;
 
     public IReadOnlyList<LobbyCharacterDefinition> Characters => _availableCharacters;
     public LobbyCharacterDefinition SelectedCharacter => _selectedCharacter;
@@ -53,8 +54,11 @@ public sealed class LobbyManager : MonoBehaviour
     public bool IsMetaProcessing => _savingBoundary || _startingRun || (IsMetaReady && (_purchases.IsProcessing || _loadouts.IsProcessing || _questActions.IsProcessing || _saves.IsSaving || _metaInitializer.IsExiting));
     public bool HasPendingMetaSave => IsMetaReady && _saves.HasPendingSave;
     public bool HasMetaOperationFault => IsMetaReady && (_purchases.IsFaulted || _loadouts.IsFaulted || _questActions.IsFaulted);
-    public bool CanRetryMetaSave => IsMetaReady && !IsCharacterTestMode && _sceneFlow.IsInMetaScene && !IsMetaProcessing && !HasMetaOperationFault && (_saves.HasChanges || _questActions.HasPendingRunResult);
-    public bool CanRetryQuestSave => CanRetryMetaSave && (_saves.PendingParts & ~QuestSaveParts) == MetaSavePart.None && (_questActions.HasPendingRunResult || (_saves.ChangedParts & QuestSaveParts) != MetaSavePart.None);
+    public bool CanRetryMetaSave => IsMetaReady && !IsCharacterTestMode && _sceneFlow.IsInMetaScene && !IsMetaProcessing && !HasMetaOperationFault && (_saves.HasChanges || HasPendingRunSettlement);
+    public bool CanRetryQuestSave => CanRetryMetaSave && (_saves.PendingParts & ~QuestSaveParts) == MetaSavePart.None && (HasPendingRunSettlement || (_saves.ChangedParts & QuestSaveParts) != MetaSavePart.None);
+
+    // 미반영 퀘스트 결과 또는 저장 완료 전의 런 정산 대기 여부
+    bool HasPendingRunSettlement => _questActions.HasPendingRunResult || _sceneFlow.HasPendingSettlement;
 
     public QuestActionService QuestActions
     {
@@ -475,7 +479,8 @@ public sealed class LobbyManager : MonoBehaviour
 
         try
         {
-            if (_questActions.HasPendingRunResult)
+            // 정산 대기 중의 저장은 반영 단계를 추적하는 SceneFlowController 경로로만 처리
+            if (HasPendingRunSettlement)
             {
                 if ((requestedParts & QuestSaveParts) != QuestSaveParts)
                 {

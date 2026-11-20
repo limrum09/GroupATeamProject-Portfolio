@@ -35,23 +35,6 @@ public static class MapTestSceneBuilder
         "PT_Grass_02", "PT_Caesars_Mushroom_01"
     };
 
-    // 승인된 카메라 기준 재생성 후 제거할 임시 실행 연결
-    [InitializeOnLoadMethod]
-    static void QueueApprovedCameraBuild()
-    {
-        EditorApplication.delayCall += () =>
-        {
-            if (EditorApplication.isPlayingOrWillChangePlaymode || SceneManager.GetActiveScene().path != ScenePath ||
-                SessionState.GetBool("MapTest.CameraFit.02", false)) return;
-            SessionState.SetBool("MapTest.CameraFit.02", true);
-            try { BuildForestClearing(); }
-            catch (Exception exception)
-            {
-                EditorUtility.DisplayDialog("MapTest camera build stopped", exception.Message, "확인");
-            }
-        };
-    }
-
     static T RequireAsset<T>(string path) where T : Object
     {
         T asset = AssetDatabase.LoadAssetAtPath<T>(path);

@@ -15,6 +15,7 @@ public sealed class PlayerActor : MonoBehaviour
     [SerializeField] PlayerMovement _movement;
     [SerializeField] CombatController _combat;
     [SerializeField] CombatEffectPresenter _effectPresenter;
+    [SerializeField] DashAfterimagePresenter _dashAfterimage;
 
     [Header("----- 외형 생성 위치 -----")]
     [SerializeField] Transform _visualRoot;
@@ -22,6 +23,9 @@ public sealed class PlayerActor : MonoBehaviour
     Camera _inputCamera;
     EventSystem _eventSystem;
     CombatEffect _effectPlayer;
+    CombatCameraShake _cameraShake;
+    SoundPlayer _soundPlayer;
+    CombatSoundPresenter _soundPresenter;
 
     PlayerAnimation _visual;
     Guid _runId;
@@ -58,7 +62,8 @@ public sealed class PlayerActor : MonoBehaviour
 
         try
         {
-            ClearVisual();
+            try { ClearSound(); }
+            finally { ClearVisual(); }
         }
         finally
         {
@@ -68,7 +73,7 @@ public sealed class PlayerActor : MonoBehaviour
 
     void ValidateComposition()
     {
-        if (_status == null || _controller == null || _input == null || _movement == null || _combat == null || _effectPresenter == null || _visualRoot == null)
+        if (_status == null || _controller == null || _input == null || _movement == null || _combat == null || _effectPresenter == null || _dashAfterimage == null || _visualRoot == null)
             throw new MissingReferenceException($"{name}: 플레이어 구성 요소와 VisualRoot 연결 필요");
 
         if (_inputCamera == null || _eventSystem == null || _effectPlayer == null)
@@ -96,6 +101,9 @@ public sealed class PlayerActor : MonoBehaviour
 
         if (!_movement.IsReadyForControl)
             throw new InvalidOperationException($"{name}: NavMesh 위에 활성 이동 구성 배치 필요");
+
+        if (_soundPlayer != null && (!_soundPlayer.isActiveAndEnabled || _soundPresenter == null || !_soundPresenter.IsListening))
+            throw new InvalidOperationException($"{name}: 전투음 사용 시 활성 재생기와 사운드 구독 완료 필요");
     }
 
     void RequirePreparation(Guid runId)
@@ -197,6 +205,8 @@ public sealed class PlayerActor : MonoBehaviour
                 _inputCamera = null;
                 _eventSystem = null;
                 _effectPlayer = null;
+                _cameraShake = null;
+                _soundPlayer = null;
             }
         }
     }
@@ -210,6 +220,9 @@ public sealed class PlayerActor : MonoBehaviour
         {
             if (_controller != null)
                 _controller.UnbindAnimation();
+
+            if (_dashAfterimage != null)
+                _dashAfterimage.UnbindVisual();
         }
         finally
         {
@@ -218,6 +231,23 @@ public sealed class PlayerActor : MonoBehaviour
                 visual.gameObject.SetActive(false);
                 Destroy(visual.gameObject);
             }
+        }
+    }
+
+    void ClearSound()
+    {
+        CombatSoundPresenter presenter = _soundPresenter;
+        _soundPresenter = null;
+        if (presenter == null) return;
+
+        try
+        {
+            presenter.Unbind();
+        }
+        finally
+        {
+            presenter.gameObject.SetActive(false);
+            Destroy(presenter.gameObject);
         }
     }
 
@@ -251,7 +281,9 @@ public sealed class PlayerActor : MonoBehaviour
     /// <param name="inputCamera">월드 입력 좌표를 계산할 카메라</param>
     /// <param name="eventSystem">UI 입력 소비를 판정할 EventSystem</param>
     /// <param name="effectPlayer">같은 씬의 전투 이펙트 재생기</param>
-    public void BindScene(Camera inputCamera, EventSystem eventSystem, CombatEffect effectPlayer)
+    /// <param name="cameraShake">같은 씬의 선택적 카메라 흔들림 연출</param>
+    /// <param name="soundPlayer">전투음 사용 씬의 재생기, 전투음 미사용 씬은 null</param>
+    public void BindScene(Camera inputCamera, EventSystem eventSystem, CombatEffect effectPlayer, CombatCameraShake cameraShake, SoundPlayer soundPlayer)
     {
         RequirePlayMode();
 
@@ -267,9 +299,15 @@ public sealed class PlayerActor : MonoBehaviour
         if (effectPlayer == null)
             throw new ArgumentNullException(nameof(effectPlayer));
 
+        if (soundPlayer != null && (!soundPlayer.isActiveAndEnabled || soundPlayer.gameObject.scene != gameObject.scene ||
+            soundPlayer.transform.IsChildOf(transform)))
+            throw new InvalidOperationException($"{name}: 같은 씬의 플레이어 외부에 활성 사운드 재생기 배치 필요");
+
         _inputCamera = inputCamera;
         _eventSystem = eventSystem;
         _effectPlayer = effectPlayer;
+        _cameraShake = cameraShake;
+        _soundPlayer = soundPlayer;
     }
 
     /// <summary>
@@ -331,7 +369,18 @@ public sealed class PlayerActor : MonoBehaviour
 
             _controller.BindAnimation(_visual);
             _input.BindScene(_inputCamera, _eventSystem);
-            _effectPresenter.BindEffectPlayer(_effectPlayer);
+            _effectPresenter.BindEffectPlayer(_effectPlayer, _cameraShake);
+
+            // 비활성 공통 루트 아래에 선택 캐릭터의 사운드 기능 구성
+            if (_soundPlayer != null)
+            {
+                _soundPresenter = Instantiate(definition.GetCombatSoundPrefab(), transform, false);
+                _soundPresenter.Bind(_combat, _soundPlayer);
+            }
+
+            // 외형 루트의 잔상 설정은 외형별 선택 구성
+            if (_visual.TryGetComponent(out DashAfterimageSource afterimageSource))
+                _dashAfterimage.BindVisual(afterimageSource);
 
             // 기본 상태와 런 성장 적용은 기존 Combat 메서드에 위임
             _status.InitializeForRun(definition, runId, initialGrowth);
@@ -433,7 +482,8 @@ public sealed class PlayerActor : MonoBehaviour
         try
         {
             DisableControl();
-            ClearVisual();
+            try { ClearSound(); }
+            finally { ClearVisual(); }
         }
         finally
         {

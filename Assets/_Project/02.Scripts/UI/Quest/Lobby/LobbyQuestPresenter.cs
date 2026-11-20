@@ -55,7 +55,7 @@ public class LobbyQuestPresenter : IDisposable
 
     void HandleRetryRequested()
     {
-        Execute(() => _lobby.SaveMetaChangesAsync(MetaSavePart.DailyQuests | MetaSavePart.MetaGold));
+        Execute(() => _lobby.SaveMetaChangesAsync(MetaSavePart.DailyQuests | MetaSavePart.MetaGold | MetaSavePart.Mastery));
     }
 
     async void Execute(Func<Task<bool>> request)

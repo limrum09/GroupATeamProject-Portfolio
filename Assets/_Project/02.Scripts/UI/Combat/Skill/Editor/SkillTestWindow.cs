@@ -372,7 +372,7 @@ public class SkillTestWindow : EditorWindow
             if (_skill != _combat.MovementDefinition) return "이 플레이어의 고정 이동 스킬을 선택하세요.";
             return _combat.MovementSkillRemainingCooldown > 0f ? "이동 스킬 재사용 대기 중입니다." : null;
         }
-        if (_skill == _combat.BasicAttackDefinition) return null;
+        if (_combat.Owner.Status.Definition.IsBasicAttackSkill(_skill)) return null;
         int slot = EquippedSlot();
         if (slot < 0) return "테스트 씬의 스킬 패널에서 선택한 스킬을 Q/W/E/R 슬롯에 장착하세요.";
         if (!_actor.Loadout.GetSkill(slot).IsReady) return "스킬 재사용 대기 중입니다.";
@@ -474,7 +474,7 @@ public class SkillTestWindow : EditorWindow
         try
         {
             bool accepted = _skill is MovementSkillDefinition ? _controller.RequestMovementSkill(Direction)
-                : _skill == _combat.BasicAttackDefinition ? _combat.TryAttack(_dummy)
+                : _combat.Owner.Status.Definition.IsBasicAttackSkill(_skill) ? _combat.TryAttack(_dummy)
                 : _controller.RequestUseSkill(EquippedSlot(), Direction, _aim, _hasAim);
             _hasCast = accepted;
             if (!accepted) _message = "시전 요청 거절";
@@ -913,6 +913,22 @@ public class SkillTestWindow : EditorWindow
             Vector3 end = _origin + Direction * movement.Distance;
             Line(_origin, end, RangeColor, size);
             Label(end, "예상 도착", RangeColor, size);
+        }
+        else if (_skill is DashStrikeSkillDefinition dashStrike)
+        {
+            // 조준점까지의 수평 거리를 최소·최대 돌진 거리로 제한
+            float distance = dashStrike.Distance;
+
+            if (_hasAim)
+            {
+                Vector3 offset = _aim - _origin;
+                offset.y = 0f;
+                distance = Mathf.Clamp(offset.magnitude, dashStrike.MinDistance, dashStrike.Distance);
+            }
+
+            Vector3 end = _origin + Direction * distance;
+            Line(_origin, end, RangeColor, size);
+            Label(end, "예상 도착 공격", RangeColor, size);
         }
     }
 }

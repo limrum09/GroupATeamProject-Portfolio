@@ -94,7 +94,7 @@ public class DamageTextView : MonoBehaviour
     /// <summary>
     /// 새 피해 숫자의 내용과 출력 상태 초기화 및 방향별 이동 시작
     /// </summary>
-    /// <param name="damage">실제 감소한 체력</param>
+    /// <param name="damage">표시할 피해량 또는 회복량</param>
     /// <param name="isCritical">치명타 여부</param>
     /// <param name="color">숫자 표시 색상</param>
     /// <param name="horizontalDirection">왼쪽 -1부터 오른쪽 1까지의 수평 이동 비율</param>

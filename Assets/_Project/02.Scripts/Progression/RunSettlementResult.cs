@@ -22,6 +22,8 @@ public class RunSettlementResult
     public int VisitedNodeCount { get; }
     public int VisitedWorldCount { get; }
     public int PlayerLevel { get; }
+    public PlayerDefinition PlayerDefinition { get; }
+    public CharacterStatValues PlayerStats { get; }
     public Difficulty SelectedDifficulty { get; }
     public IReadOnlyList<(int Slot, SkillDefinition Definition, int Level)> Skills { get; }
     public bool IsRewardEligible => EndReason == RunEndReason.PlayerDied || EndReason == RunEndReason.Cleared;
@@ -40,10 +42,12 @@ public class RunSettlementResult
     /// <param name="playerLevel">종료 시점 세션 레벨</param>
     /// <param name="skills">종료 시점 보유 스킬의 슬롯, 정의, 레벨</param>
     /// <param name="selectedDifficulty">런 시작 시 선택한 난이도</param>
+    /// <param name="playerDefinition">런에서 사용한 플레이어 정의</param>
+    /// <param name="playerStats">종료 시점 전투 스탯</param>
     public RunSettlementResult(Guid runId, RunEndReason endReason, decimal rawScore,
         decimal appliedMultiplier, decimal finalScore, long metaGold, long metaExperience,
         RunStatistics statistics, int playerLevel, (int Slot, SkillDefinition Definition, int Level)[] skills,
-        Difficulty selectedDifficulty)
+        Difficulty selectedDifficulty, PlayerDefinition playerDefinition, CharacterStatValues playerStats)
     {
         if (runId == Guid.Empty) throw new ArgumentException("런 식별자 필요", nameof(runId));
         if (!Enum.IsDefined(typeof(RunEndReason), endReason)) throw new ArgumentOutOfRangeException(nameof(endReason));
@@ -72,6 +76,10 @@ public class RunSettlementResult
         VisitedNodeCount = statistics.VisitedNodeCount;
         VisitedWorldCount = statistics.VisitedWorldCount;
         PlayerLevel = playerLevel;
+        PlayerDefinition = playerDefinition != null
+            ? playerDefinition
+            : throw new ArgumentNullException(nameof(playerDefinition));
+        PlayerStats = playerStats;
         SelectedDifficulty = selectedDifficulty;
         Skills = Array.AsReadOnly(((int Slot, SkillDefinition Definition, int Level)[])skills.Clone());
     }

@@ -25,6 +25,8 @@ public class ClickIndicatorController : MonoBehaviour
     Vector3 _worldPosition;
     bool _subscribed;
 
+    public event Action OnGroundClickAccepted;
+
     void OnEnable()
     {
         ValidateConfiguration();
@@ -84,6 +86,7 @@ public class ClickIndicatorController : MonoBehaviour
 
     void HandleGroundClick(Vector3 position, bool isAttackMove)
     {
+        OnGroundClickAccepted?.Invoke();
         ReturnActive();
 
         _worldPosition = position;

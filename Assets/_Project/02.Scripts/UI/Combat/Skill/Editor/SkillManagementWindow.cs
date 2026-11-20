@@ -728,6 +728,7 @@ public class SkillManagementWindow : EditorWindow
         menu.AddItem(new GUIContent("대상 공격"), false, () => CreateSkill(typeof(TargetDamageSkillDefinition), null));
         menu.AddItem(new GUIContent("범위 공격"), false, () => CreateSkill(typeof(AreaDamageSkillDefinition), null));
         menu.AddItem(new GUIContent("이동"), false, () => CreateSkill(typeof(MovementSkillDefinition), null));
+        menu.AddItem(new GUIContent("돌진 공격"), false, () => CreateSkill(typeof(DashStrikeSkillDefinition), null));
         menu.AddItem(new GUIContent("적 돌진"), false, () => CreateSkill(typeof(ChargeAttackSkillDefinition), null));
         menu.ShowAsContext();
     }

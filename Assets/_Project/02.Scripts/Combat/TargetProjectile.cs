@@ -28,6 +28,12 @@ public sealed class TargetProjectile : MonoBehaviour
     bool _finished;
 
     public Vector3 Direction => _direction;
+    public bool IsFlightFinished => _finished;
+
+    // 고정 목적지까지 남은 비행 시간, 수명이 더 짧으면 만료까지의 시간
+    public float RemainingPositionFlightTime => _initialized && _fliesToPosition && !_finished
+        ? Mathf.Min(Vector3.Distance(transform.position, _destination) / _speed, _remainingLifetime)
+        : 0f;
 
     void Start()
     {

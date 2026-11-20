@@ -100,8 +100,14 @@ public class RunScoreSession
         // 사망을 일으킨 타격의 피격 통지까지 수신한 뒤 해제
         StopRecordingStatistics();
 
+        CharacterStatus status = _playerTarget.Status;
+        PlayerDefinition definition = (PlayerDefinition)status.Definition;
+        CharacterStatValues stats = new CharacterStatValues(
+            status.MaxHealth, status.AttackPower, status.Defense, status.SpellPower,
+            status.MoveSpeed, status.AttackSpeed, status.CriticalChance, status.CriticalDamageMultiplier);
+
         List<(int Slot, SkillDefinition Definition, int Level)> skills =
-            new List<(int, SkillDefinition, int)>();
+            new List<(int, SkillDefinition, int)>(loadout.SlotCount + 1);
         for (int slot = 0; slot < loadout.SlotCount; slot++)
         {
             SkillInstance skill = loadout.GetSkill(slot);
@@ -109,7 +115,13 @@ public class RunScoreSession
                 skills.Add((slot, skill.Definition, skill.Level));
         }
 
-        return _progression.Finish(reason, playerLevel, skills.ToArray());
+        CombatController combat = loadout.Combat;
+        BasicAttackComboDefinition basicAttackCombo = combat.BasicAttackComboDefinition;
+        SkillDefinition basicAttack = basicAttackCombo != null ? basicAttackCombo.Skill : null;
+        if (basicAttack != null)
+            skills.Add((loadout.SlotCount, basicAttack, combat.BasicAttackLevel));
+
+        return _progression.Finish(reason, playerLevel, skills.ToArray(), definition, stats);
     }
 
     /// <summary>

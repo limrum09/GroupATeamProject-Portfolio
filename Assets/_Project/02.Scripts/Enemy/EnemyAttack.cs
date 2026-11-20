@@ -24,12 +24,15 @@ public class EnemyAttack : MonoBehaviour
     SkillInstance[] _skills = Array.Empty<SkillInstance>();
     long _actionId;
     readonly EnemyAttackSequenceExecution _sequence = new EnemyAttackSequenceExecution();
-    readonly Dictionary<SkillDefinition, SkillInstance[]> _sequenceSkills =
-        new Dictionary<SkillDefinition, SkillInstance[]>();
+    readonly Dictionary<SkillDefinition, (SkillInstance[] Steps, bool ChainOnActionCompleted, float ChainDelay)> _sequenceSkills =
+        new Dictionary<SkillDefinition, (SkillInstance[] Steps, bool ChainOnActionCompleted, float ChainDelay)>();
 
     ChargeAttackExecution _charge;
     EnemyMovement _chargeMovement;
     CombatEffect _effectPlayer;
+
+    internal event Action<CombatActionInfo> OnChargeMovementStarted;
+    internal event Action<long> OnChargeMovementEnded;
 
     public CombatController Combat => _combat;
     public bool HasSkills => _skills.Length > 0;
@@ -85,6 +88,7 @@ public class EnemyAttack : MonoBehaviour
 
     void HandleChargeEnded(long actionId, CombatActionResult result)
     {
+        OnChargeMovementEnded?.Invoke(actionId);
         if (_actionId != actionId)
             return;
 
@@ -101,6 +105,7 @@ public class EnemyAttack : MonoBehaviour
 
         // 준비 종료와 이동 시작 성공 이후 돌진 모션 재생
         _animation.PlaySkill(execution.Action.Id, execution.Action.Skill.MotionClip, true);
+        execution.OnExecuted += (action, _) => OnChargeMovementStarted?.Invoke(action);
 
         CombatEffect player = _effectPlayer;
         SkillDefinition definition = execution.Action.Skill;
@@ -177,6 +182,10 @@ public class EnemyAttack : MonoBehaviour
 
     bool IsWithinSkillRange(SkillDefinition definition, CombatTarget target)
     {
+        // 연속 낙뢰의 후속 단계는 이미 선택한 대상과의 거리 검사 생략
+        if (definition is RandomAreaDamageSkillDefinition { IgnoreTargetDistance: true })
+            return true;
+
         // 지정 위치형은 Combat과 같은 배치 가능 거리·지면 검사 사용
         if (definition is AreaDamageSkillDefinition area &&
             area.PlacementMode == AreaPlacementMode.RequestedWorldPosition)
@@ -222,7 +231,7 @@ public class EnemyAttack : MonoBehaviour
 
     void HandleActionEnded(long actionId, CombatActionResult result)
     {
-        _sequence.NotifyEnded(actionId, result);
+        _sequence.NotifyEnded(actionId, result, Time.timeAsDouble);
         if (_actionId != actionId)
             return;
 
@@ -287,12 +296,12 @@ public class EnemyAttack : MonoBehaviour
         return _combat.TryEnemyAttack(skill, request);
     }
 
-    Dictionary<SkillDefinition, SkillInstance[]> CreateSequences(
+    Dictionary<SkillDefinition, (SkillInstance[] Steps, bool ChainOnActionCompleted, float ChainDelay)> CreateSequences(
         EnemyDefinition definition, SkillInstance[] skills,
         HashSet<SkillDefinition> registered)
     {
-        Dictionary<SkillDefinition, SkillInstance[]> sequences =
-            new Dictionary<SkillDefinition, SkillInstance[]>();
+        Dictionary<SkillDefinition, (SkillInstance[] Steps, bool ChainOnActionCompleted, float ChainDelay)> sequences =
+            new Dictionary<SkillDefinition, (SkillInstance[] Steps, bool ChainOnActionCompleted, float ChainDelay)>();
         HashSet<SkillDefinition> children = new HashSet<SkillDefinition>();
 
         if (definition.AttackSequences == null)
@@ -302,6 +311,10 @@ public class EnemyAttack : MonoBehaviour
         {
             if (sequence == null || sequence.Steps == null || sequence.Steps.Count < 2)
                 throw new InvalidOperationException($"{definition.name}: 연속 공격에 두 단계 이상 연결 필요");
+
+            float chainDelay = sequence.ChainDelay;
+            if (chainDelay < 0f || float.IsNaN(chainDelay) || float.IsInfinity(chainDelay))
+                throw new InvalidOperationException($"{sequence.name}: 연속 공격 연결 대기 시간은 0 이상의 유한한 값 필요");
 
             SkillDefinition first = sequence.Steps[0];
             if (first == null || !registered.Contains(first) || sequences.ContainsKey(first))
@@ -324,14 +337,14 @@ public class EnemyAttack : MonoBehaviour
                 if (skill == null)
                     throw new MissingReferenceException($"{sequence.name}: {i}번 스킬 연결 필요");
 
-                if (skill is ChargeAttackSkillDefinition || skill is MovementSkillDefinition)
+                if (skill is ChargeAttackSkillDefinition || skill is MovementSkillDefinition || skill is DashStrikeSkillDefinition)
                     throw new InvalidOperationException($"{sequence.name}: 연속 공격에 이동 스킬 등록 불가");
 
                 if (i == 0)
                     continue;
 
                 if (registered.Contains(skill) || !children.Add(skill) ||
-                    skill == definition.BasicAttackSkill || skill.Cooldown != 0f)
+                    definition.IsBasicAttackSkill(skill) || skill.Cooldown != 0f)
                 {
                     throw new InvalidOperationException(
                         $"{sequence.name}: 후속 단계는 중복되지 않는 전용 스킬과 쿨타임 0 설정 필요");
@@ -341,7 +354,7 @@ public class EnemyAttack : MonoBehaviour
                 steps[i] = new SkillInstance(skill);
             }
 
-            sequences.Add(first, steps);
+            sequences.Add(first, (steps, sequence.ChainOnActionCompleted, chainDelay));
         }
 
         return sequences;
@@ -373,7 +386,7 @@ public class EnemyAttack : MonoBehaviour
             if (skill == null)
                 throw new MissingReferenceException($"{definition.name}: {i}번 스킬 연결 필요");
 
-            if (!registered.Add(skill) || skill == definition.BasicAttackSkill)
+            if (!registered.Add(skill) || definition.IsBasicAttackSkill(skill))
                 throw new InvalidOperationException($"{definition.name}: 중복 스킬 또는 고정 기본 공격 등록 불가");
 
             ValidateSkill(skill);
@@ -383,8 +396,7 @@ public class EnemyAttack : MonoBehaviour
             skills[i] = new SkillInstance(skill);
         }
 
-        Dictionary<SkillDefinition, SkillInstance[]> sequences =
-            CreateSequences(definition, skills, registered);
+        var sequences = CreateSequences(definition, skills, registered);
 
         StopAttack();
         ReleaseCharge();
@@ -397,7 +409,7 @@ public class EnemyAttack : MonoBehaviour
 
         _skills = skills;
         _sequenceSkills.Clear();
-        foreach (KeyValuePair<SkillDefinition, SkillInstance[]> sequence in sequences)
+        foreach (var sequence in sequences)
             _sequenceSkills.Add(sequence.Key, sequence.Value);
     }
 
@@ -427,9 +439,8 @@ public class EnemyAttack : MonoBehaviour
             return;
         }
 
-        bool actionOrMotionPlaying = _combat.IsBusy ||
-            (_charge != null && _charge.IsRunning) || _animation.IsAttackPlaying;
-        _sequence.Tick(actionOrMotionPlaying, TryRequestSkill);
+        bool actionPlaying = _combat.IsBusy || (_charge != null && _charge.IsRunning);
+        _sequence.Tick(actionPlaying, _animation.IsAttackPlaying, Time.timeAsDouble, TryRequestSkill);
     }
 
     /// <summary>
@@ -474,9 +485,10 @@ public class EnemyAttack : MonoBehaviour
             if (!skill.IsReady || !IsWithinSkillRange(skill.Definition, target))
                 continue;
 
-            if (_sequenceSkills.TryGetValue(skill.Definition, out SkillInstance[] steps))
+            if (_sequenceSkills.TryGetValue(skill.Definition, out var sequence))
             {
-                _sequence.Start(steps, target, TryRequestSkill);
+                _sequence.Start(sequence.Steps, target, sequence.ChainOnActionCompleted,
+                    sequence.ChainDelay, TryRequestSkill);
                 return;
             }
 

@@ -16,6 +16,9 @@ public class Enemy : MonoBehaviour
     [Header("----- 전투 이펙트 -----")]
     [SerializeField] CombatEffectPresenter _effectPresenter;
 
+    [Header("----- 사망 연출 -----")]
+    [SerializeField] EnemyDeathDissolve _deathDissolve;
+
     [Header("----- 전투 대상 -----")]
     [SerializeField] CombatTarget _combatTarget;
 
@@ -28,11 +31,10 @@ public class Enemy : MonoBehaviour
     Transform _hudAnchor;
     Transform _damageAnchor;
 
-    public event Action OnDeathAnimationEnded
-    {
-        add => _ai.OnDeathAnimationEnded += value;
-        remove => _ai.OnDeathAnimationEnded -= value;
-    }
+    bool _deathAnimationEnded;
+    bool _deathDissolveEnded;
+
+    public event Action OnDeathPresentationEnded;
 
     public CombatTeam Team => CombatTeam.Enemy;
     public CharacterStatus Status => _status;
@@ -44,10 +46,10 @@ public class Enemy : MonoBehaviour
 
     void Awake()
     {
-        if (_status == null || _ai == null || _effectPresenter == null)
+        if (_status == null || _ai == null || _effectPresenter == null || _deathDissolve == null)
         {
             throw new MissingReferenceException(
-                $"{name}: CharacterStatus, EnemyAI, CombatEffectPresenter가 필요합니다.");
+                $"{name}: CharacterStatus, EnemyAI, CombatEffectPresenter, EnemyDeathDissolve가 필요합니다.");
         }
 
         ValidateCombatTarget();
@@ -64,6 +66,38 @@ public class Enemy : MonoBehaviour
             throw new InvalidOperationException(
                 $"{name}: 같은 적의 Status와 루트 및 Enemy 진영을 사용하는 CombatTarget 필요");
         }
+    }
+
+    void HandleDeathAnimationStarted()
+    {
+        try
+        {
+            _deathDissolve.Play(_content.transform, HandleDeathDissolveEnded);
+        }
+        catch (Exception error)
+        {
+            // 연출 설정 오류 보고 후 사망 확정 객체의 풀 반환 계속
+            Debug.LogException(error, this);
+            HandleDeathDissolveEnded();
+        }
+    }
+
+    void HandleDeathAnimationEnded()
+    {
+        _deathAnimationEnded = true;
+        TryFinishDeathPresentation();
+    }
+
+    void HandleDeathDissolveEnded()
+    {
+        _deathDissolveEnded = true;
+        TryFinishDeathPresentation();
+    }
+
+    void TryFinishDeathPresentation()
+    {
+        if (_deathAnimationEnded && _deathDissolveEnded)
+            OnDeathPresentationEnded?.Invoke();
     }
 
     /// <summary>
@@ -86,10 +120,11 @@ public class Enemy : MonoBehaviour
         }
 
         if (definition == null || definition.Prefab == null || playerTarget == null ||
-            effectPlayer == null || _ai == null || _status == null || _effectPresenter == null)
+            effectPlayer == null || _ai == null || _status == null || _effectPresenter == null ||
+            _deathDissolve == null || !_deathDissolve.enabled)
         {
             throw new MissingReferenceException(
-                $"{name}: 적 데이터와 프리팹, 플레이어 CombatTarget, CombatEffect, EnemyAI, CharacterStatus, CombatEffectPresenter가 필요합니다.");
+                $"{name}: 적 데이터와 프리팹, 플레이어 CombatTarget, CombatEffect, EnemyAI, CharacterStatus, CombatEffectPresenter, 활성화된 EnemyDeathDissolve가 필요합니다.");
         }
 
         ValidateCombatTarget();
@@ -123,6 +158,8 @@ public class Enemy : MonoBehaviour
         _damageAnchor = model.DamageAnchor;
 
         _ai.Init(playerTarget, model, effectPlayer);
+        _ai.OnDeathAnimationStarted += HandleDeathAnimationStarted;
+        _ai.OnDeathAnimationEnded += HandleDeathAnimationEnded;
     }
 
     /// <summary>
@@ -139,9 +176,13 @@ public class Enemy : MonoBehaviour
         _difficultyDefinition = null;
         _hudAnchor = null;
         _damageAnchor = null;
+        _deathAnimationEnded = false;
+        _deathDissolveEnded = false;
 
         try
         {
+            _ai.OnDeathAnimationStarted -= HandleDeathAnimationStarted;
+            _ai.OnDeathAnimationEnded -= HandleDeathAnimationEnded;
             _ai.Clear();
         }
         catch (Exception error)

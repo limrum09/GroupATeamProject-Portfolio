@@ -78,9 +78,12 @@ public class RunScoreProgression
     /// <param name="reason">사망, 클리어 또는 무보상 직접 종료</param>
     /// <param name="playerLevel">종료 시점 세션 레벨</param>
     /// <param name="skills">종료 시점 보유 스킬</param>
+    /// <param name="playerDefinition">런에서 사용한 플레이어 정의</param>
+    /// <param name="playerStats">종료 시점 전투 스탯</param>
     /// <returns>런마다 잔여 점수를 버린 불변 정산 결과</returns>
     public RunSettlementResult Finish(RunEndReason reason, int playerLevel,
-        (int Slot, SkillDefinition Definition, int Level)[] skills)
+        (int Slot, SkillDefinition Definition, int Level)[] skills,
+        PlayerDefinition playerDefinition, CharacterStatValues playerStats)
     {
         if (!Enum.IsDefined(typeof(RunEndReason), reason)) throw new ArgumentOutOfRangeException(nameof(reason));
         if (_result != null) return _result;
@@ -94,7 +97,7 @@ public class RunScoreProgression
         long metaExperience = checked((long)decimal.Floor(finalScore / ScorePerMetaExperience));
         _result = new RunSettlementResult(
             RunId, reason, _score, multiplier, finalScore, metaGold, metaExperience,
-            _statistics, playerLevel, skills, _difficulty);
+            _statistics, playerLevel, skills, _difficulty, playerDefinition, playerStats);
         OnChanged?.Invoke();
         return _result;
     }

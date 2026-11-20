@@ -13,6 +13,8 @@ public sealed class CombatEffectPresenter : MonoBehaviour
     [SerializeField] ParticleSystem _basicHitEffectPrefab;
 
     CombatEffect _effectPlayer;
+    CombatCameraShake _cameraShake;
+    CombatTarget _damageTarget;
     bool _subscribed;
     public bool IsListening => _subscribed;
 
@@ -35,6 +37,12 @@ public sealed class CombatEffectPresenter : MonoBehaviour
 
             _combat.OnExecutionCreated += HandleExecutionCreated;
             _combat.OnMovementCompleted += HandleMovementCompleted;
+            if (_cameraShake != null)
+            {
+                _effectPlayer.OnAttackEffectPlayed += HandleAttackEffectPlayed;
+                _damageTarget = _combat.Owner;
+                _damageTarget.OnDamaged += HandleDamaged;
+            }
         }
         catch
         {
@@ -59,6 +67,11 @@ public sealed class CombatEffectPresenter : MonoBehaviour
             return;
 
         _subscribed = false;
+        if (_effectPlayer != null)
+            _effectPlayer.OnAttackEffectPlayed -= HandleAttackEffectPlayed;
+        if (_damageTarget != null)
+            _damageTarget.OnDamaged -= HandleDamaged;
+        _damageTarget = null;
 
         if (_combat != null)
         {
@@ -89,10 +102,19 @@ public sealed class CombatEffectPresenter : MonoBehaviour
         // 콜백에서 이 Presenter를 참조하지 않도록 필요한 값만 확보
         CombatEffect player = _effectPlayer;
         SkillDefinition definition = execution.Action.Skill;
+        CombatSource attackSource = definition == null ||
+            definition is TargetDamageSkillDefinition || definition is AreaDamageSkillDefinition || definition is DashStrikeSkillDefinition
+                ? execution.Source
+                : default;
 
         ParticleSystem hitPrefab = definition != null ? definition.HitEffectPrefab : _basicHitEffectPrefab;
         Vector3 useRotationOffset = definition != null ? definition.UseEffectRotation : Vector3.zero;
         Vector3 hitRotationOffset = definition != null ? definition.HitEffectRotation : Vector3.zero;
+        Vector3 hitPositionOffset = definition != null ? definition.HitEffectOffset : Vector3.zero;
+        bool playAreaHit = execution.Source.Team == CombatTeam.Enemy
+            && definition is AreaDamageSkillDefinition;
+        // 옵션을 켠 대상 스킬은 적중 범위 피해 대상에도 Hit Effect 재생
+        bool playSplashHit = definition is TargetDamageSkillDefinition targeted && targeted.PlayHitEffectOnAreaTargets;
 
 
         if (definition is AreaDamageSkillDefinition area)
@@ -118,12 +140,12 @@ public sealed class CombatEffectPresenter : MonoBehaviour
                 execution.OnExecuted += (action, position) =>
                 {
                     if (player != null)
-                        player.PlayAction(launchPrefab, action, position, Vector3.zero);
+                        player.PlayAction(launchPrefab, action, position, Vector3.zero, attackSource);
                 };
             }
 
-            // 장판의 각 대상과 반복 타격에 대한 Hit Effect 구독 제외
-            return;
+            if (!playAreaHit)
+                return;
         }
         else
         {
@@ -134,7 +156,21 @@ public sealed class CombatEffectPresenter : MonoBehaviour
                 execution.OnExecuted += (action, position) =>
                 {
                     if (player != null)
-                        player.PlayAction(usePrefab, action, position, useRotationOffset);
+                        player.PlayAction(usePrefab, action, position, useRotationOffset, attackSource);
+                };
+            }
+
+            // 돌진 공격의 도착 범위 시작 시점 연출
+            if (definition is DashStrikeSkillDefinition dashStrike && dashStrike.ArrivalEffectPrefab != null)
+            {
+                ParticleSystem arrivalPrefab = dashStrike.ArrivalEffectPrefab;
+
+                execution.OnAreaStarted += (position, rotation, hasRuntime, followAnchor) =>
+                {
+                    if (player == null)
+                        return;
+
+                    player.PlayArea(execution, arrivalPrefab, position, rotation, Vector3.zero, Vector3.zero, hasRuntime, followAnchor);
                 };
             }
         }
@@ -143,10 +179,11 @@ public sealed class CombatEffectPresenter : MonoBehaviour
         {
             execution.OnImpact += impact =>
             {
-                if (player == null || !impact.IsPrimaryTarget)
+                if (player == null || (!playAreaHit && !playSplashHit && !impact.IsPrimaryTarget))
                     return;
 
-                player.Play(hitPrefab, impact.Position, impact.Rotation, hitRotationOffset);
+                // 회전 보정 전의 공격 방향 기준으로 위치 보정
+                player.Play(hitPrefab, impact.Position + impact.Rotation * hitPositionOffset, impact.Rotation, hitRotationOffset, attackSource);
             };
         }
     }
@@ -156,9 +193,8 @@ public sealed class CombatEffectPresenter : MonoBehaviour
         if (!_subscribed || !isActiveAndEnabled)
             return;
 
-        MovementSkillDefinition definition = (MovementSkillDefinition)action.Skill;
-
-        if (definition.ArrivalEffectPrefab == null)
+        // 돌진 공격의 도착 연출은 범위 시작 시점에 별도 재생
+        if (!(action.Skill is MovementSkillDefinition definition) || definition.ArrivalEffectPrefab == null)
             return;
 
         Quaternion rotation = Quaternion.LookRotation(action.Direction, Vector3.up);
@@ -166,11 +202,24 @@ public sealed class CombatEffectPresenter : MonoBehaviour
         _effectPlayer.Play(definition.ArrivalEffectPrefab, position, rotation, Vector3.zero);
     }
 
+    void HandleAttackEffectPlayed(CombatSource source)
+    {
+        if (_subscribed && _cameraShake != null && source.Id == _combat.Owner.Source.Id)
+            _cameraShake.Play();
+    }
+
+    void HandleDamaged(DamageRequest request, float appliedDamage)
+    {
+        if (_subscribed && appliedDamage > 0f && _cameraShake != null)
+            _cameraShake.PlayHit();
+    }
+
     /// <summary>
     /// 비활성 캐릭터 구성 단계에서 씬 재생기 연결
     /// </summary>
     /// <param name="player">같은 씬의 이펙트 재생기</param>
-    public void BindEffectPlayer(CombatEffect player)
+    /// <param name="cameraShake">플레이어의 선택적 카메라 흔들림 연출</param>
+    public void BindEffectPlayer(CombatEffect player, CombatCameraShake cameraShake = null)
     {
         if (gameObject.activeInHierarchy)
             throw new System.InvalidOperationException($"{name}: 비활성 캐릭터 구성 단계에서 재생기 연결 필요");
@@ -178,6 +227,7 @@ public sealed class CombatEffectPresenter : MonoBehaviour
         // 검증 성공 이후 기존 연결 교체
         ValidateEffectPlayer(player);
         _effectPlayer = player;
+        _cameraShake = cameraShake;
     }
 
     /// <summary>
@@ -190,5 +240,6 @@ public sealed class CombatEffectPresenter : MonoBehaviour
 
         Unsubscribe();
         _effectPlayer = null;
+        _cameraShake = null;
     }
 }

@@ -18,6 +18,9 @@ public class EnemyModel : MonoBehaviour
     [Header("----- 대미지 표시 기준점 -----")]
     [SerializeField] Transform _damageAnchor;
 
+    [Header("----- 선택 공격 이펙트 -----")]
+    [SerializeField] EnemyAttackVfxPresenter _attackVfxPresenter;
+
     // 이번 외형 및 행동 구성을 소유한 공용 적 객체
     protected Enemy _enemy;
 
@@ -28,6 +31,7 @@ public class EnemyModel : MonoBehaviour
     public Collider ContactCollider => _contactCollider;
     public Transform HudAnchor => _hudAnchor;
     public Transform DamageAnchor => _damageAnchor;
+    public EnemyAttackVfxPresenter AttackVfxPresenter => _attackVfxPresenter;
 
     /// <summary>
     /// 모델 Animator와 Controller 및 대미지 기준점의 소유 계층 검사

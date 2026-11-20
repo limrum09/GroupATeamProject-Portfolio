@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -59,35 +58,11 @@ public static class TerrainTreePaletteUtility
     static bool TryReadTarget(Terrain source, Terrain target, out TreePrototype[] prototypes, out string error)
     {
         prototypes = null;
-        if (target == null || target.terrainData == null)
-        {
-            error = "대상 Terrain 또는 TerrainData 연결이 없습니다.";
-            return false;
-        }
+        if (!TerrainDataEditGuard.TryValidate(target, out error)) return false;
 
         if (target.terrainData == source.terrainData)
         {
             error = $"{target.name}: 기준 Terrain과 같은 TerrainData입니다.";
-            return false;
-        }
-
-        string path = AssetDatabase.GetAssetPath(target.terrainData);
-        if (!path.StartsWith("Assets/", StringComparison.Ordinal))
-        {
-            error = $"{target.name}: Assets 아래에 저장된 TerrainData를 지정하세요.\n현재 위치: {path}";
-            return false;
-        }
-
-        if (path.StartsWith("Assets/ThirdParty/", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("Assets/_ThirdParty/", StringComparison.OrdinalIgnoreCase))
-        {
-            error = $"{target.name}: 외부 에셋 원본은 수정할 수 없습니다. 프로젝트용 TerrainData 복사본을 지정하세요.\n현재 위치: {path}";
-            return false;
-        }
-
-        if (!AssetDatabase.IsOpenForEdit(target.terrainData))
-        {
-            error = $"{target.name}: TerrainData를 편집할 수 없습니다. 파일 잠금 또는 버전 관리 상태를 확인하세요.";
             return false;
         }
 

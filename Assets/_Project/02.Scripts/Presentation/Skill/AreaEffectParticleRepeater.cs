@@ -72,7 +72,7 @@ public class AreaEffectParticleRepeater : MonoBehaviour
         return playbackCount < definition.PulseCount;
     }
 
-    IEnumerator RepeatAfterCompletion(AreaEffectDefinition definition)
+    IEnumerator RepeatAfterCompletion(AreaEffectDefinition definition, Action onReplayed)
     {
         // CombatEffect에서 이미 재생한 첫 회차
         int playbackCount = 1;
@@ -91,6 +91,7 @@ public class AreaEffectParticleRepeater : MonoBehaviour
 
                 playbackCount++;
                 nextPlayAt = now + definition.PulseInterval;
+                onReplayed?.Invoke();
             }
 
             yield return null;
@@ -104,7 +105,8 @@ public class AreaEffectParticleRepeater : MonoBehaviour
     /// 설정 없음 또는 Once에서는 파티클 재생에 개입하지 않음
     /// </summary>
     /// <param name="definition">이번 재생의 선택적 범위 효과 설정</param>
-    public void BeginAfterInitialPlay(AreaEffectDefinition definition)
+    /// <param name="onReplayed">반복 재생 직후의 선택적 콜백</param>
+    public void BeginAfterInitialPlay(AreaEffectDefinition definition, Action onReplayed = null)
     {
         StopRepeating();
 
@@ -119,6 +121,6 @@ public class AreaEffectParticleRepeater : MonoBehaviour
 
         ValidateRepeatSettings(definition);
 
-        _repeatRoutine = StartCoroutine(RepeatAfterCompletion(definition));
+        _repeatRoutine = StartCoroutine(RepeatAfterCompletion(definition, onReplayed));
     }
 }

@@ -70,6 +70,14 @@ public class MetaUpgradePresenter : IDisposable
         return -1;
     }
 
+    bool CanEquipFromCatalog(string upgradeId)
+    {
+        // 구매를 마쳤더라도 통합 레벨 잠금 상태에서는 신규 장착 불가
+        MetaUpgradeData upgrade = _upgrades[FindCatalog(upgradeId)];
+
+        return _lobby.GetPurchasedRank(upgradeId) > 0 && FindEquipped(upgradeId) < 0 && upgrade.IsUnlockedAt(_lobby.IntegratedMasteryLevel);
+    }
+
     void Refresh()
     {
         if (!_active) return;
@@ -210,7 +218,7 @@ public class MetaUpgradePresenter : IDisposable
             return;
         }
 
-        if (_lobby.GetPurchasedRank(upgradeId) == 0 || FindEquipped(upgradeId) >= 0)
+        if (!CanEquipFromCatalog(upgradeId))
             return;
 
         for (int slot = 0; slot < _slots.Count; slot++)
@@ -246,7 +254,9 @@ public class MetaUpgradePresenter : IDisposable
 
         _selectedIndex = FindCatalog(upgradeId);
 
-        if (_lobby.GetPurchasedRank(upgradeId) == 0 || (!fromLoadout && FindEquipped(upgradeId) >= 0))
+        bool canDrag = fromLoadout ? _lobby.GetPurchasedRank(upgradeId) > 0 : CanEquipFromCatalog(upgradeId);
+
+        if (!canDrag)
         {
             _view.CancelDrag();
             Refresh();

@@ -27,10 +27,16 @@ public sealed class SkillTooltipView : MonoBehaviour
     /// <param name="skillName">표시할 이름</param>
     /// <param name="level">현재 스킬 레벨</param>
     /// <param name="description">설명, 미지정 시 설명 없음 표시</param>
-    public void Show(string skillName, int level, string description)
+    /// <param name="mode">현재 레벨 또는 강화 단계 표시 방식</param>
+    public void Show(string skillName, int level, string description, SkillTooltipMode mode = SkillTooltipMode.Current)
     {
         _nameText.text = skillName;
-        _levelText.SetText("Lv.{0}", level);
+        _levelText.text = mode switch
+        {
+            SkillTooltipMode.NextLevel => $"Lv.{level} → Lv.{level + 1}",
+            SkillTooltipMode.MaxLevel => $"Lv.{level} (MAX)",
+            _ => $"Lv.{level}"
+        };
         _descriptionText.text = string.IsNullOrWhiteSpace(description) ? "None" : description;
 
         _group.alpha = 1f;

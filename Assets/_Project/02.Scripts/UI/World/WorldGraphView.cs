@@ -9,6 +9,10 @@ using TMPro;
 /// </summary>
 public class WorldGraphView : MonoBehaviour
 {
+    const float LineWidth = 2f;
+    const float LineGlowLengthPadding = 16f;
+    const float OpenFadeDuration = 0.2f;
+
     [Header("----- 표시 구성 -----")]
     [SerializeField] WorldNodeView _nodePrefab;
     [SerializeField] RectTransform _nodeRoot;
@@ -18,24 +22,29 @@ public class WorldGraphView : MonoBehaviour
     [SerializeField] TMP_Text _tooltipText;
     [SerializeField] Canvas _canvas;
     [SerializeField] Canvas _backgroundCanvas;
-    [SerializeField] WorldMapShardMotion _shardMotion;
+    [SerializeField, Tooltip("기존 독립 테스트 화면에서 배경 그룹과 함께 생략 가능")] CanvasGroup _graphFade;
+    [SerializeField] CanvasGroup _backgroundFade;
+    [SerializeField] GameObject _screenVfx;
     [SerializeField] GraphicRaycaster _raycaster;
     [SerializeField, Tooltip("가로·세로 기본 간격. 폭이 좁은 축의 과도한 확대 제한에 사용")]
     Vector2 _nodeSpacing = new Vector2(125f, 110f);
     [SerializeField, Tooltip("Canvas 크기에 대한 노드 배치 영역의 가로·세로 비율 (0 초과, 1 이하)")]
     Vector2 _nodeLayoutRatio = new Vector2(0.75f, 0.5f);
-    [SerializeField] Sprite _inactiveLineSprite;
-    [SerializeField] Sprite _activeLineSprite;
-    [SerializeField, Min(0f)] float _nodeSwayAmplitude = 3f;
+    [SerializeField] Material _lineMaterial;
+    [SerializeField] Color _inactiveLineColor = new Color32(78, 78, 78, 255);
+    [SerializeField] Color _activeLineColor = new Color32(187, 184, 255, 255);
+    [SerializeField] Sprite _activeLineGlowSprite;
 
     SessionProgressManager _sessionProgress;
     SkillLoadout _travelActor;
+    Func<int, SkillLoadout, SessionProgressManager.MapTravelResult> _requestTravel;
     float _statusHideTime;
+    float _openFadeElapsed;
+    bool _opening;
 
     readonly List<WorldNodeView> _views = new List<WorldNodeView>();
-    readonly List<Vector2> _nodeCenters = new List<Vector2>();
-    readonly List<(int First, int Second, Image Image)> _lines =
-        new List<(int First, int Second, Image Image)>();
+    readonly List<(int First, int Second, RawImage Core, Image Glow)> _lines =
+        new List<(int First, int Second, RawImage Core, Image Glow)>();
     float _layoutScale;
     Node _firstNode;
     WorldNodeView _hoveredNode;
@@ -45,17 +54,28 @@ public class WorldGraphView : MonoBehaviour
     bool _layoutDirty = true;
     Rect _layoutRect;
 
+    public event Action<bool> OnVisibilityChanged;
+
     public bool IsOpen => _canvas.enabled && isActiveAndEnabled;
+    public bool IsFadingForTravel { get; private set; }
 
     void Awake()
     {
         if (_nodePrefab == null || _nodeRoot == null ||
             _lineRoot == null || _statusText == null || _canvas == null || _backgroundCanvas == null ||
-            _raycaster == null || _nodeRoot == _lineRoot || _shardMotion == null ||
-            _inactiveLineSprite == null || _activeLineSprite == null ||
+            _raycaster == null || _nodeRoot == _lineRoot ||
+            _screenVfx == null ||
+            _lineMaterial == null || _activeLineGlowSprite == null ||
             _tooltipPanel == null || _tooltipPanel.sprite == null || _tooltipText == null ||
             _tooltipText.font == null || _tooltipText.fontSharedMaterial == null)
-            throw new MissingReferenceException($"{name}: 노드 프리팹·연결선 스프라이트·표시 참조 연결 필요");
+            throw new MissingReferenceException($"{name}: 노드 프리팹·연결선 머티리얼과 발광 스프라이트·표시 참조 연결 필요");
+
+        if ((_graphFade == null) != (_backgroundFade == null))
+            throw new MissingReferenceException($"{name}: 지도와 배경의 페이드 그룹 동시 연결 필요");
+
+        if (_graphFade != null &&
+            (_graphFade.gameObject != _canvas.gameObject || _backgroundFade.gameObject != _backgroundCanvas.gameObject))
+            throw new InvalidOperationException($"{name}: 각 지도 Canvas와 같은 오브젝트의 페이드 그룹 필요");
     }
 
     void OnDisable()
@@ -79,11 +99,10 @@ public class WorldGraphView : MonoBehaviour
             Destroy(view.gameObject);
         }
         _views.Clear();
-        _nodeCenters.Clear();
         foreach (var line in _lines)
         {
-            line.Image.gameObject.SetActive(false);
-            Destroy(line.Image.gameObject);
+            line.Glow.gameObject.SetActive(false);
+            Destroy(line.Glow.gameObject);
         }
         _lines.Clear();
         _firstNode = null;
@@ -91,9 +110,12 @@ public class WorldGraphView : MonoBehaviour
 
     void HandleClicked(int nodeId)
     {
-        if (!IsOpen) return;
+        if (!IsOpen || _opening || IsFadingForTravel) return;
 
-        switch (_sessionProgress.TryEnterNodeFromMap(nodeId, _travelActor))
+        SessionProgressManager.MapTravelResult result = _requestTravel != null
+            ? _requestTravel(nodeId, _travelActor)
+            : _sessionProgress.TryEnterNodeFromMap(nodeId, _travelActor);
+        switch (result)
         {
             case SessionProgressManager.MapTravelResult.OutsidePortalRange:
                 ShowStatus("포탈 근처에서만 이동할 수 있습니다");
@@ -102,7 +124,8 @@ public class WorldGraphView : MonoBehaviour
                 ShowStatus("아직 포탈이 열리지 않았습니다");
                 break;
             case SessionProgressManager.MapTravelResult.Accepted:
-                Close();
+                if (_requestTravel == null)
+                    Close();
                 break;
         }
     }
@@ -190,13 +213,52 @@ public class WorldGraphView : MonoBehaviour
 
         if (_sessionProgress == null || !IsOpen || _updatingLayout || _rebuilding) return;
 
-        if (_layoutDirty)
+        if (_opening)
         {
-            RefreshLayout();
-            return;
+            _openFadeElapsed += Time.unscaledDeltaTime;
+            float progress = Mathf.Clamp01(_openFadeElapsed / OpenFadeDuration);
+            SetFade(Mathf.SmoothStep(0f, 1f, progress));
+            if (progress >= 1f)
+            {
+                _opening = false;
+                _raycaster.enabled = true;
+            }
         }
 
-        UpdateAnimatedPositions();
+        if (_layoutDirty)
+            RefreshLayout();
+
+        if (IsOpen && !IsFadingForTravel) RefreshTravelEffects();
+    }
+
+    void SetFade(float opacity)
+    {
+        _graphFade.alpha = opacity;
+        _backgroundFade.alpha = opacity;
+    }
+
+    void RefreshTravelEffects()
+    {
+        int currentNodeId = _sessionProgress.Progress.CurrentNodeId;
+        foreach (var line in _lines)
+        {
+            int destinationId = line.First == currentNodeId ? line.Second
+                : line.Second == currentNodeId ? line.First : -1;
+            if (destinationId >= 0 &&
+                _sessionProgress.CanTravelFromMap(destinationId, _travelActor))
+            {
+                SetTravelEffects(true);
+                return;
+            }
+        }
+
+        SetTravelEffects(false);
+    }
+
+    void SetTravelEffects(bool visible)
+    {
+        if (_screenVfx.activeSelf != visible)
+            _screenVfx.SetActive(visible);
     }
 
     void RefreshLayout()
@@ -258,7 +320,7 @@ public class WorldGraphView : MonoBehaviour
         _layoutRect = GetLayoutRect();
         Vector2 minimum = graph.Nodes[0].LayoutPosition;
         Vector2 maximum = minimum;
-        Vector2 visualSize = _nodePrefab.Rect.rect.size + Vector2.one * (2f * _nodeSwayAmplitude);
+        Vector2 visualSize = _nodePrefab.Rect.rect.size;
         if (!(_nodeSpacing.x > 0f && _nodeSpacing.x < float.PositiveInfinity &&
               _nodeSpacing.y > 0f && _nodeSpacing.y < float.PositiveInfinity))
             throw new InvalidOperationException($"{name}: 유한한 양수 노드 간격 필요");
@@ -304,43 +366,40 @@ public class WorldGraphView : MonoBehaviour
         }
 
         _layoutScale = nodeScale;
-        _nodeCenters.Clear();
         Vector2 center = (minimum + maximum) * 0.5f;
         foreach (Node node in graph.Nodes)
         {
             WorldNodeView view = _views[node.Id];
             view.Rect.localScale = Vector3.one * _layoutScale;
             Vector2 offset = Vector2.Scale(node.LayoutPosition - center, spacing);
-            _nodeCenters.Add(_layoutRect.center + offset);
+            view.Rect.anchoredPosition = _layoutRect.center + offset;
         }
     }
 
-    void UpdateAnimatedPositions()
+    void UpdateLineGeometry()
     {
-        float time = Time.unscaledTime;
-        float amplitude = _nodeSwayAmplitude * _layoutScale;
-        for (int id = 0; id < _views.Count; id++)
-        {
-            float phase = id * 2.399963f;
-            Vector2 offset = new Vector2(
-                Mathf.Sin(time * 0.85f + phase) * 0.65f,
-                Mathf.Sin(time * 1.1f + phase));
-            _views[id].Rect.anchoredPosition = _nodeCenters[id] + offset * amplitude;
-        }
-
+        float glowWidth = _activeLineGlowSprite.rect.width * _layoutScale;
+        float glowPadding = LineGlowLengthPadding * _layoutScale;
+        float lineWidth = LineWidth * _layoutScale;
+        // 본선 양옆 한 화면 픽셀에 해당하는 안티앨리어싱 여백
+        float edgePadding = 1f / _canvas.scaleFactor;
+        float paddedWidth = lineWidth + 2f * edgePadding;
+        Rect lineUv = new Rect(-edgePadding / lineWidth, 0f, paddedWidth / lineWidth, 1f);
         foreach (var line in _lines)
         {
             Vector2 start = _lineRoot.InverseTransformPoint(_views[line.First].Rect.position);
             Vector2 end = _lineRoot.InverseTransformPoint(_views[line.Second].Rect.position);
             Vector2 delta = end - start;
-            RectTransform rect = line.Image.rectTransform;
+            RectTransform rect = line.Glow.rectTransform;
             rect.localPosition = (start + end) * 0.5f;
             // 세로 원본 스프라이트의 위쪽 축을 연결 방향으로 회전
             float angle = Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg - 90f;
             rect.localRotation = Quaternion.Euler(0f, 0f, angle);
-            rect.sizeDelta = new Vector2(line.Image.sprite.rect.width * _layoutScale, delta.magnitude);
+            float length = delta.magnitude;
+            rect.sizeDelta = new Vector2(glowWidth, length + glowPadding);
+            line.Core.rectTransform.sizeDelta = new Vector2(paddedWidth, length);
+            line.Core.uvRect = lineUv;
         }
-        PositionTooltip();
     }
 
     void Rebuild(WorldGraphManager graph)
@@ -376,17 +435,26 @@ public class WorldGraphView : MonoBehaviour
             {
                 if (next <= node.Id)
                     continue;
-                GameObject line = new GameObject($"Link_{node.Id}_{next}",
-                    typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-                RectTransform rect = (RectTransform)line.transform;
-                rect.SetParent(_lineRoot, false);
-                rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
-                Image image = line.GetComponent<Image>();
-                image.sprite = _inactiveLineSprite;
-                image.raycastTarget = false;
-                _lines.Add((node.Id, next, image));
+                Image glow = CreateLineGraphic<Image>($"Link_{node.Id}_{next}", _lineRoot);
+                glow.sprite = _activeLineGlowSprite;
+                glow.enabled = false;
+                RawImage core = CreateLineGraphic<RawImage>("Line", glow.rectTransform);
+                core.material = _lineMaterial;
+                core.color = _inactiveLineColor;
+                _lines.Add((node.Id, next, core, glow));
             }
         }
+    }
+
+    static T CreateLineGraphic<T>(string objectName, RectTransform parent) where T : Graphic
+    {
+        GameObject line = new GameObject(objectName, typeof(RectTransform), typeof(CanvasRenderer), typeof(T));
+        T graphic = line.GetComponent<T>();
+        RectTransform rect = graphic.rectTransform;
+        rect.SetParent(parent, false);
+        rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+        graphic.raycastTarget = false;
+        return graphic;
     }
 
     void Refresh()
@@ -418,17 +486,19 @@ public class WorldGraphView : MonoBehaviour
         if (_firstNode != graph.Nodes[0] || _layoutRect != GetLayoutRect())
             Rebuild(graph);
         WorldProgress progress = _sessionProgress.Progress;
+        int currentNodeId = progress.CurrentNodeId;
         foreach (Node node in graph.Nodes)
-            _views[node.Id].Present(node, progress.CurrentNodeId == node.Id,
+            _views[node.Id].Present(node, currentNodeId == node.Id,
                 progress.IsNodeKnown(node.Id), progress.IsVisited(node.Id),
                 _travelActor != null && !_sessionProgress.IsTransitioning && progress.CanEnterNode(node.Id));
 
         foreach (var line in _lines)
         {
-            bool active = progress.IsNodeKnown(line.First) && progress.IsNodeKnown(line.Second);
-            line.Image.sprite = active ? _activeLineSprite : _inactiveLineSprite;
+            bool active = line.First == currentNodeId || line.Second == currentNodeId;
+            line.Core.color = active ? _activeLineColor : _inactiveLineColor;
+            line.Glow.enabled = active;
         }
-        UpdateAnimatedPositions();
+        UpdateLineGeometry();
         RefreshTooltip();
     }
 
@@ -437,13 +507,19 @@ public class WorldGraphView : MonoBehaviour
     /// </summary>
     /// <param name="progress">현재 세션의 월드 진행 담당자</param>
     /// <param name="actor">이동 요청 플레이어, 플레이어 없는 화면에서는 생략 가능</param>
-    public void Bind(SessionProgressManager progress, SkillLoadout actor)
+    /// <param name="requestTravel">화면 연출과 함께 이동을 접수할 담당자, 즉시 이동이면 생략</param>
+    public void Bind(SessionProgressManager progress, SkillLoadout actor,
+        Func<int, SkillLoadout, SessionProgressManager.MapTravelResult> requestTravel = null)
     {
         if (progress == null) throw new ArgumentNullException(nameof(progress));
         if (_sessionProgress != null)
             throw new InvalidOperationException("이전 월드맵 연결 해제 필요");
+        if (requestTravel != null && _graphFade == null)
+            throw new MissingReferenceException($"{name}: 워프 연출용 지도와 배경 페이드 그룹 필요");
+
         _sessionProgress = progress;
         _travelActor = actor;
+        _requestTravel = requestTravel;
         _sessionProgress.OnStateChanged += Refresh;
         _subscribed = true;
         Close();
@@ -461,6 +537,7 @@ public class WorldGraphView : MonoBehaviour
         _subscribed = false;
         _sessionProgress = null;
         _travelActor = null;
+        _requestTravel = null;
         ClearElements();
     }
 
@@ -471,14 +548,39 @@ public class WorldGraphView : MonoBehaviour
     {
         if (_sessionProgress == null)
             throw new InvalidOperationException("월드맵 연결 필요");
-        if (!_sessionProgress.IsReady || _sessionProgress.IsTransitioning) return;
+        if (!_sessionProgress.IsReady || _sessionProgress.IsTransitioning || IsFadingForTravel) return;
 
+        bool wasOpen = IsOpen;
         _raycaster.enabled = false;
+        if (!wasOpen && _graphFade != null)
+        {
+            _openFadeElapsed = 0f;
+            _opening = true;
+            SetFade(0f);
+        }
         _canvas.enabled = true;
         _backgroundCanvas.enabled = true;
         RefreshLayout();
-        _raycaster.enabled = IsOpen;
-        if (IsOpen) _shardMotion.Play();
+        _raycaster.enabled = IsOpen && !_opening;
+        if (IsOpen) RefreshTravelEffects();
+
+        if (!wasOpen && IsOpen)
+            OnVisibilityChanged?.Invoke(true);
+    }
+
+    /// <summary>
+    /// 워프 화면이 덮는 만큼 지도 표시 감소와 노드 선택 차단
+    /// </summary>
+    /// <param name="opacity">남은 지도 투명도</param>
+    public void SetTravelOpacity(float opacity)
+    {
+        if (!IsOpen) return;
+
+        _opening = false;
+        IsFadingForTravel = true;
+        _raycaster.enabled = false;
+        HideTooltip();
+        SetFade(opacity);
     }
 
     /// <summary>
@@ -486,11 +588,20 @@ public class WorldGraphView : MonoBehaviour
     /// </summary>
     public void Close()
     {
+        bool wasOpen = _canvas.enabled;
+        _opening = false;
+        IsFadingForTravel = false;
         _canvas.enabled = false;
         _backgroundCanvas.enabled = false;
-        _shardMotion.Stop();
+        SetTravelEffects(false);
         _raycaster.enabled = false;
         HideTooltip();
         _statusText.enabled = false;
+
+        foreach (WorldNodeView view in _views)
+            view.StopCurrentMarkerPulse();
+
+        if (wasOpen)
+            OnVisibilityChanged?.Invoke(false);
     }
 }

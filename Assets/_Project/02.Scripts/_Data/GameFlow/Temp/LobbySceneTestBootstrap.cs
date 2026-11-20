@@ -77,20 +77,15 @@ public class LobbySceneTestBootstrap : MonoBehaviour
                 flow = _sceneFlow;
             }
 
-            bool initialized = await flow.EnsureInitializedAsync(retryFailed: true);
+            // 프로필 준비 후 로비 씬 다시 불러오기
+            bool entered = await flow.EnterMetaSceneAsync();
 
             // 대기 중 씬이나 대상이 종료된 경우 처리 중단
             if (this == null || flow == null)
                 return;
 
-            if (!initialized)
-            {
+            if (!entered)
                 Debug.LogError("초기화 실패. 설정을 수정한 뒤 Context 메뉴에서 다시 시도하세요.", this);
-                return;
-            }
-
-            if (!flow.TryReturnToMetaScene(true))
-                Debug.LogWarning("현재 씬 이동 요청을 받을 수 없습니다.", this);
         }
         catch (Exception exception)
         {

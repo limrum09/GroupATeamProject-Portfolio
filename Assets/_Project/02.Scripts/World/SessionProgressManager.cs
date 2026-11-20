@@ -305,13 +305,7 @@ public class SessionProgressManager : MonoBehaviour
             !_nodeProgressManager.IsBusy && _enemySpawnManager.EnemyCount == 0;
     }
 
-    /// <summary>
-    /// 현재 포탈 거리와 노드 완료 상태에 따른 월드맵 이동 요청
-    /// </summary>
-    /// <param name="nodeId">목적 노드 ID</param>
-    /// <param name="actor">이동을 요청한 플레이어의 스킬 구성</param>
-    /// <returns>요청 접수 또는 거절 사유</returns>
-    public MapTravelResult TryEnterNodeFromMap(int nodeId, SkillLoadout actor)
+    MapTravelResult? GetMapTravelRejection(int nodeId, SkillLoadout actor)
     {
         if (!IsReady || IsTransitioning || _runClearRequested ||
             actor == null || !_worldProgress.CanEnterNode(nodeId))
@@ -324,6 +318,44 @@ public class SessionProgressManager : MonoBehaviour
 
         if (!_worldProgress.IsCleared(current.Id))
             return MapTravelResult.PortalClosed;
+
+        return null;
+    }
+
+    /// <summary>
+    /// 월드맵에서 목적 노드로 이동 가능한지 조회
+    /// </summary>
+    /// <param name="nodeId">목적 노드 ID</param>
+    /// <param name="actor">이동할 플레이어의 스킬 구성</param>
+    /// <returns>현재 이동 가능 여부</returns>
+    public bool CanTravelFromMap(int nodeId, SkillLoadout actor)
+    {
+        return CheckMapTravel(nodeId, actor) == MapTravelResult.Accepted;
+    }
+
+    /// <summary>
+    /// 지도 이동 연출 시작 전 포탈 접근과 목적지 상태 확인
+    /// </summary>
+    /// <param name="nodeId">목적 노드 ID</param>
+    /// <param name="actor">이동할 플레이어의 스킬 구성</param>
+    /// <returns>이동 가능 여부 또는 거절 사유</returns>
+    public MapTravelResult CheckMapTravel(int nodeId, SkillLoadout actor)
+    {
+        return GetMapTravelRejection(nodeId, actor) ??
+            (CanEnterNode(nodeId) ? MapTravelResult.Accepted : MapTravelResult.Rejected);
+    }
+
+    /// <summary>
+    /// 현재 포탈 거리와 노드 완료 상태에 따른 월드맵 이동 요청
+    /// </summary>
+    /// <param name="nodeId">목적 노드 ID</param>
+    /// <param name="actor">이동을 요청한 플레이어의 스킬 구성</param>
+    /// <returns>요청 접수 또는 거절 사유</returns>
+    public MapTravelResult TryEnterNodeFromMap(int nodeId, SkillLoadout actor)
+    {
+        MapTravelResult result = CheckMapTravel(nodeId, actor);
+        if (result != MapTravelResult.Accepted)
+            return result;
 
         return TryEnterNode(nodeId) ? MapTravelResult.Accepted : MapTravelResult.Rejected;
     }
@@ -378,8 +410,9 @@ public class SessionProgressManager : MonoBehaviour
     /// </summary>
     /// <param name="requestId">배치 요청에서 전달한 ID</param>
     /// <param name="succeeded">플레이어 배치 성공 여부</param>
+    /// <param name="arrivalPosition">워프 배치 확정 위치, 일반 진입이면 생략</param>
     /// <returns>현재 요청의 응답 접수 여부</returns>
-    public bool CompletePlacement(long requestId, bool succeeded)
+    public bool CompletePlacement(long requestId, bool succeeded, Vector3? arrivalPosition = null)
     {
         // 해제 이전 요청이나 이전 이동의 늦은 응답 거절
         if (!_prepared || _pendingNode == null || requestId != _pendingPlacementId)
@@ -399,7 +432,7 @@ public class SessionProgressManager : MonoBehaviour
         try
         {
             _worldProgress.CommitNodeEntry(destination.Id);
-            _nodeProgressManager.BeginNode(destination, _worldProgress.IsCleared(destination.Id));
+            _nodeProgressManager.BeginNode(destination, _worldProgress.IsCleared(destination.Id), arrivalPosition);
         }
         catch
         {
@@ -418,6 +451,22 @@ public class SessionProgressManager : MonoBehaviour
             OnWorldPrepared?.Invoke();
         OnStateChanged?.Invoke();
         return true;
+    }
+
+    /// <summary>
+    /// 디졸브 완료 통지 및 도착 구역의 스폰 대기 갱신
+    /// </summary>
+    public void CompleteArrivalDissolve()
+    {
+        _nodeProgressManager.CompleteArrivalDissolve();
+    }
+
+    /// <summary>
+    /// 디졸브 완료 이후 접수된 지면 클릭으로 도착 구역의 스폰 대기 해제
+    /// </summary>
+    public void AcceptArrivalGroundClick()
+    {
+        _nodeProgressManager.AcceptArrivalGroundClick();
     }
 
     /// <summary>

@@ -11,6 +11,16 @@ public enum FixedSkillSlotKind
     Movement
 }
 
+/// <summary>
+/// 스킬 툴팁의 레벨 표시 방식
+/// </summary>
+public enum SkillTooltipMode
+{
+    Current,
+    NextLevel,
+    MaxLevel
+}
+
 /// <summary>스킬바 화면 표시와 Hover 전달 계약</summary>
 public interface ISkillBarView
 {
@@ -58,7 +68,8 @@ public interface ISkillBarView
     /// <param name="skillName">스킬 이름</param>
     /// <param name="level">현재 레벨</param>
     /// <param name="description">설명</param>
-    void ShowTooltip(string skillName, int level, string description);
+    /// <param name="mode">현재 레벨 또는 강화 단계 표시 방식</param>
+    void ShowTooltip(string skillName, int level, string description, SkillTooltipMode mode = SkillTooltipMode.Current);
 
     /// <summary>공용 툴팁 숨김</summary>
     void HideTooltip();
@@ -84,4 +95,4 @@ public interface ISkillBarView
 
     /// <summary>단축키를 유지한 채 장착 표시와 툴팁 정리</summary>
     void Clear();
-}   
+}

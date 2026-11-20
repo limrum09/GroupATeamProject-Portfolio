@@ -205,9 +205,18 @@ public class EnemyMovement : MonoBehaviour, IChargeMovement
         _agent.stoppingDistance = _arrivalDistance;
 
         // 초기화 완료와 이전 이동 상태 정리
+        _agent.enabled = true;
         _speedState = EnemyState.Tracking;
         _initialized = true;
         Stop();
+    }
+
+    /// <summary>
+    /// 사망 상태 진입 후 NavMesh 이동과 회피 참여 해제
+    /// </summary>
+    public void DisableNavigationOnDeath()
+    {
+        _agent.enabled = false;
     }
 
     /// <summary>
@@ -270,9 +279,10 @@ public class EnemyMovement : MonoBehaviour, IChargeMovement
     }
 
     /// <summary>
-    /// 이동 제한과 도착 및 경로 실패 처리
+    /// 주시 대상 회전과 이동 제한, 도착 및 경로 실패 처리
     /// </summary>
-    public void Tick()
+    /// <param name="facingTarget">경로 진행 방향보다 우선하는 월드 좌표</param>
+    public void Tick(Vector3? facingTarget)
     {
         // 이동 기능 초기화 여부 확인
         if (_initialized == false)
@@ -281,6 +291,10 @@ public class EnemyMovement : MonoBehaviour, IChargeMovement
         // 준비 시간을 포함한 돌진 이동은 공용 실행에서만 갱신
         if (_chargeExecution != null && _chargeExecution.IsRunning)
             return;
+
+        // 경로가 없는 대치 대기 중에도 주시 방향 갱신
+        if (facingTarget.HasValue && isActiveAndEnabled && AgentReady && _combat.Owner.IsAlive)
+            Face(facingTarget.Value);
 
         // 진행 중인 이동 요청 여부 확인
         if (IsMoving == false)
@@ -323,8 +337,9 @@ public class EnemyMovement : MonoBehaviour, IChargeMovement
                 return;
             }
 
-            // 현재 경로의 진행 방향으로 회전
-            Face(_agent.steeringTarget);
+            // 주시 대상이 없을 때 현재 경로의 진행 방향으로 회전
+            if (!facingTarget.HasValue)
+                Face(_agent.steeringTarget);
             return;
         }
 

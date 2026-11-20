@@ -17,8 +17,12 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
     [Header("----- 배치 설정 -----")]
     [SerializeField, Min(0.01f)] float _placementSampleRadius = 0.5f;
 
+    [Header("----- 회전 -----")]
+    [Tooltip("초당 회전 각도, 0이면 즉시 회전")]
+    [SerializeField, Min(0f)] float _turnSpeed = 1500f;
+
     NavMeshPath _path;
-    MovementSkillDefinition _skillMoveDefinition;
+    ISkillMovementSettings _skillMoveSettings;
     Vector3 _skillMoveDirection;
     const float SkillProbeStep = 0.2f;
     const float SkillPositionTolerance = 0.02f;
@@ -26,6 +30,8 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
     float _skillMoveSpeed;
     bool _arrivalPending;
     bool _skillMoving;
+    bool _hasFacingPoint;
+    Vector3 _facingPoint;
 
     bool AgentReady => _agent.isActiveAndEnabled && _agent.isOnNavMesh;
 
@@ -59,6 +65,20 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
             Vector3 velocity = _agent.velocity;
             velocity.y = 0f;
             return velocity.magnitude;
+        }
+    }
+
+    // 현재 실제 이동의 수평 방향, 정지 중이면 zero
+    public Vector3 LocomotionDirection
+    {
+        get
+        {
+            if (LocomotionSpeed <= 0f)
+                return Vector3.zero;
+
+            Vector3 velocity = _agent.velocity;
+            velocity.y = 0f;
+            return velocity.normalized;
         }
     }
 
@@ -168,7 +188,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
         return false;
     }
 
-    bool TryTraceSkillMovement(MovementSkillDefinition definition, Vector3 direction, float distance, out Vector3 destination)
+    bool TryTraceSkillMovement(ISkillMovementSettings settings, Vector3 direction, float distance, out Vector3 destination)
     {
         destination = default;
 
@@ -180,7 +200,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
 
         Physics.SyncTransforms();
 
-        if (HasSkillBlockingOverlap(start, definition.BlockingMask))
+        if (HasSkillBlockingOverlap(start, settings.BlockingMask))
             return false;
 
         NavMeshQueryFilter filter = new NavMeshQueryFilter
@@ -212,7 +232,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
             if (NavMesh.Raycast(destination, sample.position, out _, filter))
                 break;
 
-            if (IsSkillSegmentBlocked(destination, sample.position, definition.BlockingMask))
+            if (IsSkillSegmentBlocked(destination, sample.position, settings.BlockingMask))
                 break;
 
             destination = sample.position;
@@ -397,18 +417,69 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
             return;
         }
 
-        Face(_agent.steeringTarget);
+        // 이동 방향 회전은 TickFacing에서 회전 속도에 맞춰 처리
+    }
+
+    /// <summary>
+    /// 이동 방향 대신 바라볼 지점 지정
+    /// </summary>
+    /// <param name="point">바라볼 월드 좌표</param>
+    public void SetFacingPoint(Vector3 point)
+    {
+        _hasFacingPoint = true;
+        _facingPoint = point;
+    }
+
+    /// <summary>
+    /// 바라볼 지점 해제, 이후 이동 경로 방향 기준 회전
+    /// </summary>
+    public void ClearFacingPoint()
+    {
+        _hasFacingPoint = false;
+    }
+
+    /// <summary>
+    /// 지정 지점 또는 이동 경로 방향으로 회전 속도에 맞춰 회전
+    /// </summary>
+    /// <param name="deltaTime">이번 프레임의 게임 시간</param>
+    public void TickFacing(float deltaTime)
+    {
+        // 스킬 이동은 Combat의 전용 처리 경로에서 방향 결정
+        if (_skillMoving || !isActiveAndEnabled)
+            return;
+
+        Vector3 goal;
+
+        if (_hasFacingPoint)
+            goal = _facingPoint;
+        else if (HasMoveRequest && AgentReady && _agent.hasPath)
+            goal = _agent.steeringTarget;
+        else
+            return;
+
+        Vector3 direction = goal - _agent.transform.position;
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude <= 0.0001f)
+            return;
+
+        Quaternion target = Quaternion.LookRotation(direction);
+
+        _agent.transform.rotation = _turnSpeed <= 0f
+            ? target
+            : Quaternion.RotateTowards(_agent.transform.rotation, target, _turnSpeed * deltaTime);
     }
 
     /// <summary>
     /// 위치 변경 없이 이동 시작 가능 여부 검사
     /// </summary>
-    /// <param name="definition">이동 설정</param>
+    /// <param name="settings">이동 설정</param>
     /// <param name="direction">정규화된 수평 이동 방향</param>
+    /// <param name="distance">이번 이동의 목표 거리</param>
     /// <returns>이동 가능한 구간 존재 여부</returns>
-    public bool CanStartSkillMovement(MovementSkillDefinition definition, Vector3 direction)
+    public bool CanStartSkillMovement(ISkillMovementSettings settings, Vector3 direction, float distance)
     {
-        return !_skillMoving && TryTraceSkillMovement(definition, direction, definition.Distance, out _);
+        return !_skillMoving && TryTraceSkillMovement(settings, direction, distance, out _);
     }
 
     /// <summary>
@@ -424,7 +495,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
             return SkillMovementStepResult.Failed;
         }
 
-        if (_skillMoveDefinition.Mode == MovementSkillMode.Teleport)
+        if (_skillMoveSettings.Mode == MovementSkillMode.Teleport)
         {
             CancelSkillMovement();
             return SkillMovementStepResult.Completed;
@@ -435,7 +506,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
 
         float step = Mathf.Min(_skillMoveRemaining, _skillMoveSpeed * deltaTime);
 
-        if (!TryTraceSkillMovement(_skillMoveDefinition, _skillMoveDirection, step, out Vector3 destination))
+        if (!TryTraceSkillMovement(_skillMoveSettings, _skillMoveDirection, step, out Vector3 destination))
         {
             // 시작 이후 장애물에 막힌 이동의 조기 완료
             CancelSkillMovement();
@@ -465,18 +536,19 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
     /// <summary> 
     /// 이동 경로 재검사 후 대쉬 또는 순간이동 시작
     /// </summary>
-    /// <param name="definition">이동 설정</param>
+    /// <param name="settings">이동 설정</param>
     /// <param name="direction">정규화된 수평 이동 방향</param>
+    /// <param name="distance">이번 이동의 목표 거리</param>
     /// <returns>이동 시작 성공 여부</returns>
-    public bool TryBeginSkillMovement(MovementSkillDefinition definition, Vector3 direction)
+    public bool TryBeginSkillMovement(ISkillMovementSettings settings, Vector3 direction, float distance)
     {
-        if (_skillMoving || !TryTraceSkillMovement(definition, direction, definition.Distance, out Vector3 destination))
+        if (_skillMoving || !TryTraceSkillMovement(settings, direction, distance, out Vector3 destination))
             return false;
 
         Vector3 start = _agent.nextPosition;
         Stop();
 
-        if (definition.Mode == MovementSkillMode.Teleport && !_agent.Warp(destination))
+        if (settings.Mode == MovementSkillMode.Teleport && !_agent.Warp(destination))
         {
             return false;
         }
@@ -484,10 +556,11 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
         Vector3 displacement = destination - start;
         displacement.y = 0f;
 
-        _skillMoveDefinition = definition;
+        _skillMoveSettings = settings;
         _skillMoveDirection = direction;
         _skillMoveRemaining = displacement.magnitude;
-        _skillMoveSpeed = definition.Mode == MovementSkillMode.Dash ? definition.Distance / definition.DashDuration : 0f;
+        // 짧은 이동도 최대 거리 기준의 같은 속도 유지
+        _skillMoveSpeed = settings.Mode == MovementSkillMode.Dash ? settings.Distance / settings.DashDuration : 0f;
         _skillMoving = true;
 
         return true;
@@ -553,7 +626,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
     public void CancelSkillMovement()
     {
         _skillMoving = false;
-        _skillMoveDefinition = null;
+        _skillMoveSettings = null;
         _skillMoveDirection = Vector3.zero;
         _skillMoveRemaining = 0f;
         _skillMoveSpeed = 0f;

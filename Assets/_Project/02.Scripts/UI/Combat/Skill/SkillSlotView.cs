@@ -1,11 +1,12 @@
 ﻿using System;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>전달받은 스킬 슬롯 정보의 화면 표시</summary>
 [DisallowMultipleComponent]
-public sealed class SkillSlotView : MonoBehaviour
+public sealed class SkillSlotView : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
     [Header("----- 장착 정보 표시 -----")]
     [SerializeField] Image _icon;
@@ -30,7 +31,9 @@ public sealed class SkillSlotView : MonoBehaviour
     bool _dragEnabledBeforeUpgrade;
 
     public event Action<SkillSlotView> OnUpgradeRequested;
+    public event Action<SkillSlotView, bool> OnSlotHoverChanged;
 
+    public bool IsPointerInside { get; private set; }
     public SkillIconHover HoverTarget => _hoverTarget;
     public SkillSlotDragInput DragInput => _dragInput;
 
@@ -40,6 +43,7 @@ public sealed class SkillSlotView : MonoBehaviour
     }
     void OnDisable()
     {
+        SetSlotHover(false);
         if (_upgradeBindingsInitialized)
             SetUpgradeMode(false);
     }
@@ -54,6 +58,32 @@ public sealed class SkillSlotView : MonoBehaviour
     {
         if (_upgradeMode)
             OnUpgradeRequested?.Invoke(this);
+    }
+
+    void SetSlotHover(bool hovered)
+    {
+        if (IsPointerInside == hovered) return;
+
+        IsPointerInside = hovered;
+        OnSlotHoverChanged?.Invoke(this, hovered);
+    }
+
+    /// <summary>
+    /// 강화 버튼을 포함한 슬롯 영역 진입
+    /// </summary>
+    /// <param name="eventData">포인터 이벤트 정보</param>
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        SetSlotHover(true);
+    }
+
+    /// <summary>
+    /// 강화 버튼을 포함한 슬롯 영역 이탈
+    /// </summary>
+    /// <param name="eventData">포인터 이벤트 정보</param>
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        SetSlotHover(false);
     }
 
     /// <summary>
@@ -161,7 +191,7 @@ public sealed class SkillSlotView : MonoBehaviour
         _upgradeButton.interactable = ready;
         _upgradeCurrencyIcon.gameObject.SetActive(!maximum);
 
-        _upgradeCostText.text = maximum ? $"Lv.{quote.Level}\nMAX" : $"{quote.Cost}";
+        _upgradeCostText.text = maximum ? $"MAX" : $"{quote.Cost}";
         _upgradeCostText.color = ready ? _upgradeReadyColor : _upgradeBlockedColor;
     }
 

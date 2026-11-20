@@ -16,7 +16,7 @@ public sealed class SkillInstance
     public bool CanLevelUp => !IsBasicAttack && Level < MaxLevel;
 
     /// <summary>현재 레벨로 다음 사용 시 적용할 쿨타임</summary>
-    public float Cooldown => IsBasicAttack ? 0f : Mathf.Max(0f, Definition.Cooldown - Definition.GetGrowth(Level).CooldownReduction);
+    public float Cooldown => IsBasicAttack ? 0f : Definition.GetCooldown(Level);
 
     /// <summary>진행 중인 쿨타임의 남은 비율, 준비 완료 시 0</summary>
     public float CooldownRemainingRatio => _cooldownDuration > 0f ? Mathf.Clamp01(RemainingCooldown / _cooldownDuration) : 0f;

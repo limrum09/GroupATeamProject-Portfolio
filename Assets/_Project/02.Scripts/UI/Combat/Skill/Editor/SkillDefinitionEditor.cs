@@ -8,6 +8,69 @@ using UnityEditor;
 [CustomEditor(typeof(SkillDefinition), true)]
 public class SkillDefinitionEditor : Editor
 {
+    // Inspector 한글 표시 이름, 스킬 종류별로 의미가 다른 항목은 호출부에서 직접 지정
+    static readonly Dictionary<string, string> Labels = new Dictionary<string, string>
+    {
+        { "m_Script", "스크립트" },
+
+        { "_icon", "아이콘" },
+        { "_skillName", "스킬 이름" },
+        { "_skillDescription", "스킬 설명" },
+        { "_category", "직업 분류" },
+        { "_skillUID", "스킬 UID" },
+        { "_levelGrowth", "레벨별 성장" },
+
+        { "_castTime", "시전 시간" },
+        { "_postCastMoveLockDuration", "발동 후 이동 제한 시간" },
+        { "_cooldown", "재사용 대기시간" },
+        { "motionClip", "모션 클립" },
+
+        { "_targetMode", "대상 선택 방식" },
+        { "_range", "사거리" },
+        { "_targetMask", "대상 레이어" },
+        { "_aimMode", "공격 방향 방식" },
+        { "_rotationMode", "캐릭터 회전 방식" },
+
+        { "_damageMultiplier", "공격력 계수" },
+        { "_spellPowerMultiplier", "주문력 계수" },
+        { "_onHitAreaEffect", "적중 범위 효과" },
+        { "_applyDirectDamage", "직격 피해 적용" },
+        { "_includeDirectTargetInArea", "직격 대상도 범위 피해에 포함" },
+        { "_playHitEffectOnAreaTargets", "범위 피해 대상에도 타격 이펙트" },
+
+        { "_useProjectile", "탄환 사용" },
+        { "_flightMode", "탄환 비행 방식" },
+        { "_projectilePrefab", "탄환 프리팹" },
+        { "_projectileSpeed", "탄환 속도" },
+        { "_projectileRadius", "탄환 반경" },
+        { "_projectileLifetime", "탄환 수명" },
+        { "_projectileSpawnOffset", "탄환 발사 위치 보정" },
+        { "_projectileLaunchEffectPrefab", "발사 이펙트" },
+
+        { "_areaEffect", "범위 효과" },
+        { "_placementMode", "배치 방식" },
+        { "_deliveryMode", "전달 방식" },
+        { "_trackingMode", "위치 추적 방식" },
+        { "_maxPlacementDistance", "최대 배치 거리" },
+        { "_groundMask", "지면 레이어" },
+        { "_groundProbeHeight", "지면 검사 높이" },
+        { "_groundProbeDepth", "지면 검사 깊이" },
+
+        { "_mode", "이동 방식" },
+        { "_minDistance", "최소 돌진 거리" },
+        { "_arrivalAreaEffect", "도착 범위 효과" },
+        { "_stopMask", "정지 대상 레이어" },
+
+        { "_useEffectPrefab", "사용 이펙트" },
+        { "_useEffectRotation", "사용 이펙트 회전 보정" },
+        { "_effectOffset", "사용 이펙트 위치 보정" },
+        { "_useEffectAtCaster", "사용 이펙트를 시전자 위치에서 재생" },
+        { "_hitEffectPrefab", "피격 이펙트" },
+        { "_hitEffectRotation", "피격 이펙트 회전 보정" },
+        { "_hitEffectOffset", "피격 이펙트 위치 보정" },
+        { "_arrivalEffectPrefab", "도착 이펙트" }
+    };
+
     readonly Dictionary<string, SerializedProperty> _properties = new Dictionary<string, SerializedProperty>();
 
     public bool IsEmbedded { get; set; }
@@ -30,7 +93,18 @@ public class SkillDefinitionEditor : Editor
 
     void Draw(string propertyName)
     {
-        EditorGUILayout.PropertyField(_properties[propertyName], true);
+        // 표에 없는 항목은 Unity 기본 표시 이름 사용
+        string label = Labels.TryGetValue(propertyName, out string korean) ? korean : _properties[propertyName].displayName;
+
+        Draw(propertyName, label);
+    }
+
+    void Draw(string propertyName, string label)
+    {
+        SerializedProperty property = _properties[propertyName];
+
+        // 필드에 지정된 Tooltip 유지
+        EditorGUILayout.PropertyField(property, new UnityEngine.GUIContent(label, property.tooltip), true);
     }
 
     bool HasReference(string propertyName)
@@ -71,7 +145,7 @@ public class SkillDefinitionEditor : Editor
         bool selectsTarget = targetMode != SkillTargetMode.None;
 
         // 공격 스킬의 사거리는 적 AI와 기본 공격에서도 사용
-        if (!(target is MovementSkillDefinition) || selectsTarget)
+        if (!(target is MovementSkillDefinition || target is DashStrikeSkillDefinition) || selectsTarget)
             Draw("_range");
 
         bool usesTargetMask = selectsTarget || UsesTargetProjectile() || target is ChargeAttackSkillDefinition;
@@ -87,14 +161,14 @@ public class SkillDefinitionEditor : Editor
     {
         Draw("_damageMultiplier");
         Draw("_spellPowerMultiplier");
-        Draw("_blockingMask");
+        Draw("_blockingMask", "장애물 레이어");
         Draw("_onHitAreaEffect");
 
         if (HasReference("_onHitAreaEffect"))
         {
-            EditorGUILayout.PropertyField(_properties["_applyDirectDamage"], new UnityEngine.GUIContent("직격 피해 적용"));
-
-            EditorGUILayout.PropertyField(_properties["_includeDirectTargetInArea"], new UnityEngine.GUIContent("직격 대상도 범위 피해에 포함"));
+            Draw("_applyDirectDamage");
+            Draw("_includeDirectTargetInArea");
+            Draw("_playHitEffectOnAreaTargets");
         }
 
         Draw("_useProjectile");
@@ -150,20 +224,29 @@ public class SkillDefinitionEditor : Editor
     void DrawMovementSettings()
     {
         Draw("_mode");
-        Draw("_distance");
+        Draw("_distance", "이동 거리");
 
         MovementSkillMode mode = (MovementSkillMode)_properties["_mode"].intValue;
 
         if (mode == MovementSkillMode.Dash)
-            Draw("_dashDuration");
+            Draw("_dashDuration", "대쉬 시간");
 
-        Draw("_blockingMask");
+        Draw("_blockingMask", "이동 차단 레이어");
+    }
+
+    void DrawDashStrikeSettings()
+    {
+        Draw("_minDistance");
+        Draw("_distance", "최대 돌진 거리");
+        Draw("_dashDuration", "돌진 시간");
+        Draw("_blockingMask", "이동 차단 레이어");
+        Draw("_arrivalAreaEffect");
     }
 
     void DrawChargeSettings()
     {
-        Draw("_distance");
-        Draw("_duration");
+        Draw("_distance", "최소 돌진 거리");
+        Draw("_duration", "돌진 시간");
         Draw("_stopMask");
         Draw("_damageMultiplier");
         Draw("_spellPowerMultiplier");
@@ -180,7 +263,13 @@ public class SkillDefinitionEditor : Editor
             // 대상 탄환의 발동 이펙트는 발사 위치를 그대로 사용
             // 범위 스킬의 장판 이펙트는 전달 방식과 관계없이 보정 사용
             if (!UsesTargetProjectile())
+            {
+                // 탄환 없는 대상 공격은 기본적으로 대상 위치에서 재생
+                if (target is TargetDamageSkillDefinition)
+                    Draw("_useEffectAtCaster");
+
                 Draw("_effectOffset");
+            }
         }
 
         // 범위 스킬은 공통 Hit Effect를 사용하지 않으며
@@ -192,10 +281,13 @@ public class SkillDefinitionEditor : Editor
             Draw("_hitEffectPrefab");
 
             if (HasReference("_hitEffectPrefab"))
+            {
                 Draw("_hitEffectRotation");
+                Draw("_hitEffectOffset");
+            }
         }
 
-        if (target is MovementSkillDefinition)
+        if (target is MovementSkillDefinition || target is DashStrikeSkillDefinition)
             Draw("_arrivalEffectPrefab");
     }
 
@@ -208,7 +300,7 @@ public class SkillDefinitionEditor : Editor
         if (aimMode == SkillAimMode.SelectedTarget && targetMode == SkillTargetMode.None)
             EditorGUILayout.HelpBox("Aim Mode가 Selected Target이면 " + "Target Mode에서 대상 선택 방식을 지정해야 합니다.", MessageType.Error);
 
-        bool requiresRequestedDirection = target is MovementSkillDefinition || target is ChargeAttackSkillDefinition;
+        bool requiresRequestedDirection = target is MovementSkillDefinition || target is ChargeAttackSkillDefinition || target is DashStrikeSkillDefinition;
 
         if (target is AreaDamageSkillDefinition)
         {
@@ -244,7 +336,7 @@ public class SkillDefinitionEditor : Editor
 
         Type definitionType = target.GetType();
 
-        bool supported = definitionType == typeof(TargetDamageSkillDefinition) || definitionType == typeof(AreaDamageSkillDefinition) || definitionType == typeof(MovementSkillDefinition) || definitionType == typeof(ChargeAttackSkillDefinition);
+        bool supported = definitionType == typeof(TargetDamageSkillDefinition) || definitionType == typeof(AreaDamageSkillDefinition) || definitionType == typeof(MovementSkillDefinition) || definitionType == typeof(ChargeAttackSkillDefinition) || definitionType == typeof(DashStrikeSkillDefinition);
 
         // 다른 파생 타입은 기본 Inspector로 모든 필드 표시
         if (!supported)
@@ -278,6 +370,10 @@ public class SkillDefinitionEditor : Editor
         else if (target is ChargeAttackSkillDefinition)
         {
             DrawChargeSettings();
+        }
+        else if (target is DashStrikeSkillDefinition)
+        {
+            DrawDashStrikeSettings();
         }
 
         DrawEffects();

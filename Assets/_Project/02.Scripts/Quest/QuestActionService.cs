@@ -110,11 +110,15 @@ public class QuestActionService : IDisposable
     }
 
     /// <summary>
-    /// 정상 런의 일일 진행과 돌발 보상 반영
+    /// 정상 런의 일일 진행과 돌발 보상 및 런 정산 메타 재화 반영
     /// </summary>
+    /// <param name="settlementMetaGold">런 정산으로 확정된 메타 재화, 정산 대상이 아니면 0</param>
     /// <returns>정산 반영 성공 여부</returns>
-    public Task<bool> ApplyRunResultAsync()
+    public Task<bool> ApplyRunResultAsync(long settlementMetaGold = 0)
     {
+        if (settlementMetaGold < 0)
+            throw new ArgumentOutOfRangeException(nameof(settlementMetaGold), "0 이상의 정산 재화 필요");
+
         RequireReady();
 
         if (_isProcessing)
@@ -125,12 +129,23 @@ public class QuestActionService : IDisposable
 
         // 저장 재시도에서 정산 보상 재적용 제외
         if (!_quests.HasPendingRunResult)
+        {
+            // 퀘스트 결과 없이 정산 재화만 남는 테스트 모드 불일치 설정 차단
+            if (settlementMetaGold > 0)
+                return Reject("정산 대상 런의 퀘스트 결과가 없어 메타 재화를 반영할 수 없습니다.");
+
             return Task.FromResult(true);
+        }
 
         if (!_saves.CanAcceptChanges || !_canUseLobby())
             return Reject("로비에서 다른 작업을 마친 뒤 정산할 수 있습니다.");
 
-        if (!_wallet.TryPrepareCredit(_quests.PendingSuddenReward, out long balance))
+        long suddenReward = _quests.PendingSuddenReward;
+
+        if (settlementMetaGold > long.MaxValue - suddenReward)
+            return Reject("메타 재화의 보유 가능 범위를 초과합니다.");
+
+        if (!_wallet.TryPrepareCredit(suddenReward + settlementMetaGold, out long balance))
             return Reject("메타 재화의 보유 가능 범위를 초과합니다.");
 
         return ApplyChanges(_quests.CaptureProgressRecords(), balance);

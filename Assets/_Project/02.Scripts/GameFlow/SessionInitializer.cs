@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Unity.Cinemachine;
+using Unity.Cinemachine.TargetTracking;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using System.Runtime.ExceptionServices;
@@ -10,13 +12,27 @@ using System.Runtime.ExceptionServices;
 [DisallowMultipleComponent]
 public class SessionInitializer : MonoBehaviour
 {
+    const float TravelCameraArrivalTolerance = 0.05f;
+
     [Header("----- 세션 UI -----")]
     [SerializeField] SessionUIController _ui;
+
+    [Header("----- 선택 기능: 지도 이동 연출 -----")]
+    [SerializeField] WarpScreenEffect _warpEffect;
+    [SerializeField] ClickIndicatorController _clickIndicator;
+    [SerializeField] CinemachineBrain _travelCameraBrain;
+    [SerializeField] CinemachineFollow _travelCameraFollow;
 
     [Header("----- 플레이어 씬 연결 -----")]
     [SerializeField] Camera _inputCamera;
     [SerializeField] EventSystem _eventSystem;
     [SerializeField] CombatEffect _effectPlayer;
+    [SerializeField, Tooltip("선택 기능: 플레이어의 공격 및 피격 시 메인 카메라 흔들림")] CombatCameraShake _cameraShake;
+    [SerializeField, Tooltip("선택 기능: 플레이어 피격 시 화면 가장자리 혈흔")] PlayerHitScreenVfx _playerHitScreenVfx;
+
+    [Header("----- 플레이어 전투 사운드 -----")]
+    [SerializeField] bool _useCombatAudio;
+    [SerializeField] SoundPlayer _soundPlayer;
 
     [Header("----- 월드와 적 -----")]
     [SerializeField] SessionProgressManager _world;
@@ -45,6 +61,8 @@ public class SessionInitializer : MonoBehaviour
     bool _releasing;
     bool _handlingPlacement;
     bool _failurePending;
+    int? _travelNode;
+    bool _waitForTravelCamera;
 
     [Header("----- 세션 메뉴 -----")]
     [SerializeField] bool _useSceneMenu;
@@ -78,7 +96,7 @@ public class SessionInitializer : MonoBehaviour
     bool CanHandleCancelInput()
     {
         return isActiveAndEnabled && _acceptUIInput && _connected && !_releasing &&
-            IsReady && !_handlingPlacement && !_world.IsTransitioning && !_world.HasFailure &&
+            IsReady && !_handlingPlacement && !_travelNode.HasValue && !_world.IsTransitioning && !_world.HasFailure &&
             _ui.IsBound && !_controls.IsStopped && _player.Status.IsAlive;
     }
 
@@ -198,6 +216,11 @@ public class SessionInitializer : MonoBehaviour
 
     void ValidateReferences()
     {
+        if (_useCombatAudio && _soundPlayer == null)
+            throw new MissingReferenceException($"{name}: 전투음 사용 시 씬 재생기 연결 필요");
+        if (_useCombatAudio && (!_soundPlayer.isActiveAndEnabled || _soundPlayer.gameObject.scene != gameObject.scene))
+            throw new InvalidOperationException($"{name}: 같은 씬의 활성 사운드 재생기 필요");
+
         if (_world == null || _enemies == null || _enemies.Spawner == null || _economy == null || _purchases == null || _shop == null || _ui == null ||
             _inputCamera == null || _eventSystem == null || _effectPlayer == null || _expReceiver == null || _goldReceiver == null)
         {
@@ -207,6 +230,13 @@ public class SessionInitializer : MonoBehaviour
 
         if (_difficultyInitializer == null || _scoreReceiver == null || _scoreReceiver.Source != _enemies)
             throw new MissingReferenceException($"{name}: 난이도 초기화와 동일 세션의 점수 수신기 연결 필요");
+
+        if (_cameraShake != null && (_cameraShake.gameObject.scene != gameObject.scene || !_cameraShake.isActiveAndEnabled))
+            throw new InvalidOperationException($"{name}: 같은 씬의 활성 카메라 흔들림 연출 필요");
+
+        if (_playerHitScreenVfx != null &&
+            (!_playerHitScreenVfx.isActiveAndEnabled || !_playerHitScreenVfx.transform.IsChildOf(_inputCamera.transform)))
+            throw new InvalidOperationException($"{name}: 메인 카메라 아래의 활성 피격 화면 연출 필요");
 
         Behaviour[] components =
         {
@@ -236,6 +266,112 @@ public class SessionInitializer : MonoBehaviour
 
         if (!_ui.HasSkillHud || !_expReceiver.gameObject.activeInHierarchy || !_goldReceiver.gameObject.activeInHierarchy)
             throw new InvalidOperationException("정식 런의 스킬 HUD와 활성 보상 수신 오브젝트 필요");
+
+        if ((_warpEffect == null) != (_clickIndicator == null))
+            throw new MissingReferenceException($"{name}: 지도 이동 연출과 지면 클릭 표시의 동시 연결 필요");
+
+        if (_warpEffect == null) return;
+
+        if (!_warpEffect.isActiveAndEnabled || !_clickIndicator.isActiveAndEnabled ||
+            !_warpEffect.transform.IsChildOf(_ui.transform) || !_clickIndicator.transform.IsChildOf(_ui.transform))
+            throw new InvalidOperationException($"{name}: 세션 UI 아래의 활성 지도 이동 연출과 클릭 표시 필요");
+
+        if (_travelCameraBrain == null || _travelCameraFollow == null)
+            throw new MissingReferenceException($"{name}: 지도 이동 연출의 메인 카메라 Brain과 플레이어 Follow 연결 필요");
+
+        if (!_travelCameraBrain.isActiveAndEnabled || !_travelCameraFollow.isActiveAndEnabled ||
+            _travelCameraBrain.gameObject != _inputCamera.gameObject || _travelCameraFollow.gameObject.scene != gameObject.scene ||
+            _travelCameraFollow.TrackerSettings.BindingMode != BindingMode.WorldSpace)
+            throw new InvalidOperationException($"{name}: 메인 출력 카메라와 같은 씬의 활성 월드 공간 Follow 필요");
+    }
+
+    SessionProgressManager.MapTravelResult RequestMapTravel(int nodeId, SkillLoadout actor)
+    {
+        if (!_acceptUIInput || !IsReady || _travelNode.HasValue || _controls.IsStopped ||
+            Time.timeScale <= 0f || !_warpEffect.isActiveAndEnabled ||
+            !_player.Status.IsAlive || actor != _player.Loadout)
+            return SessionProgressManager.MapTravelResult.Rejected;
+
+        SessionProgressManager.MapTravelResult result = _world.CheckMapTravel(nodeId, actor);
+        if (result != SessionProgressManager.MapTravelResult.Accepted)
+            return result;
+
+        _travelNode = nodeId;
+        try
+        {
+            // 포탈 검증 이후 이동을 막고 완전 차폐까지 기존 맵 유지
+            _player.SetPlacementBlocked(true);
+            _warpEffect.Play(CanStartMapTravelDissolve);
+        }
+        catch
+        {
+            CancelMapTravel();
+            throw;
+        }
+
+        return result;
+    }
+
+    void CommitMapTravel()
+    {
+        if (!_travelNode.HasValue) return;
+
+        try
+        {
+            _ui.HideMapUnderWarp();
+            if (_acceptUIInput && IsReady && _player.Status.IsAlive)
+                _world.TryEnterNode(_travelNode.Value);
+        }
+        catch
+        {
+            CancelMapTravel();
+            throw;
+        }
+    }
+
+    bool CanStartMapTravelDissolve()
+    {
+        if (!_waitForTravelCamera) return true;
+
+        if (_travelCameraBrain.IsBlending || _travelCameraBrain.ActiveVirtualCamera != _travelCameraFollow.VirtualCamera)
+            return false;
+
+        Vector3 targetPosition = _player.transform.position + _travelCameraFollow.FollowOffset;
+        Vector3 remainingOffset = _inputCamera.transform.position - targetPosition;
+        return remainingOffset.sqrMagnitude <= TravelCameraArrivalTolerance * TravelCameraArrivalTolerance;
+    }
+
+    void FinishMapTravel(bool dissolveCompleted)
+    {
+        if (!_travelNode.HasValue) return;
+
+        _travelNode = null;
+        _waitForTravelCamera = false;
+        try
+        {
+            if (_ui != null && _ui.IsBound)
+                _ui.RestoreAfterMapTravel();
+        }
+        finally
+        {
+            if (isActiveAndEnabled && _acceptUIInput && !_releasing && IsReady &&
+                _player != null && _player.IsPrepared && _player.Status.IsAlive)
+            {
+                if (dissolveCompleted)
+                    _world.CompleteArrivalDissolve();
+
+                _player.SetPlacementBlocked(false);
+            }
+        }
+    }
+
+    void CancelMapTravel()
+    {
+        if (!_travelNode.HasValue) return;
+
+        if (_warpEffect != null)
+            _warpEffect.Cancel();
+        FinishMapTravel(dissolveCompleted: false);
     }
 
     void HandleWorldCompleted()
@@ -290,7 +426,10 @@ public class SessionInitializer : MonoBehaviour
 
             bool hadPreviousNode = _world.Progress.HasCurrentNode;
             Pose previousPose = player.CurrentPose;
+            bool isMapTravel = _travelNode.HasValue;
 
+            _cameraShake?.Clear();
+            _playerHitScreenVfx?.Clear();
             player.SetPlacementBlocked(true);
 
 
@@ -301,10 +440,16 @@ public class SessionInitializer : MonoBehaviour
             {
                 succeed = player.TryPlace(destination);
 
-                if (!_world.CompletePlacement(requestId, succeed))
+                Vector3? arrivalPosition = succeed && isMapTravel ? player.Target.Position : null;
+                if (!_world.CompletePlacement(requestId, succeed, arrivalPosition))
                     throw new InvalidOperationException("현재 배치 응답 접수 실패");
 
                 canContinue = IsPlayerConnected(player, runId) && player.IsPrepared && player.RunId == runId && player.Status.IsAlive;
+                if (canContinue && succeed && isMapTravel)
+                {
+                    CinemachineCore.OnTargetObjectWarped(player.transform, player.CurrentPose.position - previousPose.position);
+                    _waitForTravelCamera = true;
+                }
             }
 
             if (!canContinue)
@@ -315,7 +460,7 @@ public class SessionInitializer : MonoBehaviour
             {
                 throw new InvalidOperationException("플레이어 배치 또는 이전 위치 복구 실패");
             }
-            else
+            else if (!_travelNode.HasValue)
             {
                 player.SetPlacementBlocked(false);
             }
@@ -381,7 +526,7 @@ public class SessionInitializer : MonoBehaviour
         if (_connected || _releasing || _expReceiver.IsBound || _ui.IsBound)
             throw new InvalidOperationException("이전 런 연결 해제 필요");
 
-        player.BindScene(_inputCamera, _eventSystem, _effectPlayer);
+        player.BindScene(_inputCamera, _eventSystem, _effectPlayer, _cameraShake, _useCombatAudio ? _soundPlayer : null);
     }
 
     /// <summary>
@@ -424,6 +569,9 @@ public class SessionInitializer : MonoBehaviour
         if (!player.IsPrepared || player.RunId != progression.RunId || player.gameObject.scene != gameObject.scene)
             throw new InvalidOperationException("같은 씬과 런으로 준비된 플레이어 필요");
 
+        if (_warpEffect != null && _travelCameraFollow.FollowTarget != player.transform)
+            throw new InvalidOperationException($"{name}: 지도 이동 카메라의 추적 대상으로 현재 플레이어 연결 필요");
+
         if (_connected || _releasing || _handlingPlacement || _controls != null || _scoreSession != null || _difficultyInitializer.HasBindings || _world.IsReady || _world.Graph.IsGenerated || _expReceiver.IsBound || _ui.IsBound)
             throw new InvalidOperationException("이전 배치 처리 완료와 세션 및 월드와 UI 해제 필요");
 
@@ -454,6 +602,7 @@ public class SessionInitializer : MonoBehaviour
             _economy.ResetSession();
 
             _enemies.Spawner.BindPlayerTarget(target);
+            _playerHitScreenVfx?.Bind(target);
             _enemies.OnEnemyDied += HandleEnemyDied;
 
             _purchases.BindWorld(_world);
@@ -461,8 +610,18 @@ public class SessionInitializer : MonoBehaviour
             _shop.BindPurchases(_purchases);
 
             _ui.OnShopStateChanged += _controls.SetShopOpen;
+            Func<int, SkillLoadout, SessionProgressManager.MapTravelResult> requestTravel =
+                _warpEffect != null ? RequestMapTravel : null;
             _ui.Bind(_world, _shop, _purchases, player.Loadout, playerDefinition,
-                progression, player.Status, _economy, player);
+                progression, player.Status, _economy, player, requestTravel);
+
+            if (_warpEffect != null)
+            {
+                _warpEffect.OnCoverChanged += _ui.SetMapTravelCover;
+                _warpEffect.OnFullyCovered += CommitMapTravel;
+                _warpEffect.OnEnded += FinishMapTravel;
+                _clickIndicator.OnGroundClickAccepted += _world.AcceptArrivalGroundClick;
+            }
 
             _controls.SetShopOpen(_ui.IsShopOpen);
 
@@ -490,6 +649,7 @@ public class SessionInitializer : MonoBehaviour
             if (_useSceneMenu)
                 _menuActions = new GameMenuActionController(_gameMenu, runFlow);
 
+            _cameraShake?.BeginSession();
             _ready = true;
             _acceptUIInput = true;
         }
@@ -514,7 +674,10 @@ public class SessionInitializer : MonoBehaviour
     public void BeginStopping()
     {
         _acceptUIInput = false;
+        _cameraShake?.StopAttackPlayback();
         List<Exception> errors = new List<Exception>();
+
+        TryCleanup(CancelMapTravel, errors);
 
         if (_controls != null)
             TryCleanup(_controls.Stop, errors);
@@ -546,9 +709,22 @@ public class SessionInitializer : MonoBehaviour
         try
         {
             TryCleanup(BeginStopping, errors);
+            _cameraShake?.EndSession();
+
+            if (_playerHitScreenVfx != null)
+                TryCleanup(_playerHitScreenVfx.Unbind, errors);
 
             if (hadConnection)
             {
+                if (_warpEffect != null)
+                {
+                    _warpEffect.OnCoverChanged -= _ui.SetMapTravelCover;
+                    _warpEffect.OnFullyCovered -= CommitMapTravel;
+                    _warpEffect.OnEnded -= FinishMapTravel;
+                }
+                if (_clickIndicator != null)
+                    _clickIndicator.OnGroundClickAccepted -= _world.AcceptArrivalGroundClick;
+
                 if (_ui != null && _controls != null)
                     _ui.OnShopStateChanged -= _controls.SetShopOpen;
 
@@ -592,6 +768,7 @@ public class SessionInitializer : MonoBehaviour
             _connected = false;
             _releasing = false;
             _failurePending = false;
+            _travelNode = null;
             _controls = null;
         }
 

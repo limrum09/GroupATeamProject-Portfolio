@@ -6,6 +6,8 @@ using UnityEngine;
 /// </summary>
 public class NodeProgress : MonoBehaviour
 {
+    const float ArrivalSpawnDelay = 2f;
+
     [Header("----- 구역 진행 -----")]
     [SerializeField] WaveProgress _waveProgress;
 
@@ -15,6 +17,8 @@ public class NodeProgress : MonoBehaviour
     bool _subscribed;
     bool _hasFailure;
     int _failureNotificationVersion;
+    bool _waitingForArrivalDissolve;
+    double _spawnAllowedAt;
 
     public event Action OnNodeCleared;
     public event Action OnProgressFailed;
@@ -24,7 +28,8 @@ public class NodeProgress : MonoBehaviour
 
     void Update()
     {
-        if (_map == null || IsNodeCleared || IsBusy)
+        if (_waitingForArrivalDissolve || _map == null || IsNodeCleared || IsBusy ||
+            Time.timeAsDouble < _spawnAllowedAt)
             return;
 
         CombatTarget player = _waveProgress.CombatArea.SpawnManager.Spawner.PlayerTarget;
@@ -37,8 +42,7 @@ public class NodeProgress : MonoBehaviour
                 continue;
 
             SphereCollider entry = _map.CombatAreas[i].EntryArea;
-            Vector3 local = entry.transform.InverseTransformPoint(player.Position) - entry.center;
-            if (local.sqrMagnitude > entry.radius * entry.radius)
+            if (!IsInsideEntry(entry, player.Position))
                 continue;
 
             _activeArea = i;
@@ -64,6 +68,12 @@ public class NodeProgress : MonoBehaviour
     void OnDisable()
     {
         Stop();
+    }
+
+    static bool IsInsideEntry(SphereCollider entry, Vector3 position)
+    {
+        Vector3 offset = entry.transform.InverseTransformPoint(position) - entry.center;
+        return offset.sqrMagnitude <= entry.radius * entry.radius;
     }
 
     void HandleAreaCleared()
@@ -146,7 +156,8 @@ public class NodeProgress : MonoBehaviour
     /// </summary>
     /// <param name="node">진입을 확정한 노드</param>
     /// <param name="alreadyCleared">월드에 기록된 클리어 여부</param>
-    public void BeginNode(Node node, bool alreadyCleared)
+    /// <param name="arrivalPosition">워프 배치 확정 위치, 일반 진입이면 생략</param>
+    public void BeginNode(Node node, bool alreadyCleared, Vector3? arrivalPosition = null)
     {
         Stop();
         if (_waveProgress == null || _waveProgress.CombatArea == null ||
@@ -176,6 +187,7 @@ public class NodeProgress : MonoBehaviour
             return;
         }
 
+        _waitingForArrivalDissolve = arrivalPosition.HasValue;
         _cleared = new bool[_map.CombatAreas.Count];
         for (int i = 0; i < _cleared.Length; i++)
         {
@@ -184,11 +196,36 @@ public class NodeProgress : MonoBehaviour
                 float.IsNaN(area.EntryArea.radius) || float.IsInfinity(area.EntryArea.radius) ||
                 !area.EntryArea.transform.IsChildOf(area.Root))
                 throw new InvalidOperationException($"{_map.name}: 구역 하위의 비활성 진입 SphereCollider 필요");
+
+            // 진입 영역 안에 배치된 경우 디졸브 완료 이후 추가 대기 예약
+            if (arrivalPosition.HasValue && IsInsideEntry(area.EntryArea, arrivalPosition.Value))
+                _spawnAllowedAt = double.PositiveInfinity;
         }
 
         _waveProgress.OnAreaCleared += HandleAreaCleared;
         _waveProgress.OnSpawnFailed += HandleSpawnFailed;
         _subscribed = true;
+    }
+
+    /// <summary>
+    /// 디졸브 대기 해제 및 직접 진입한 구역의 추가 스폰 대기 시작
+    /// </summary>
+    public void CompleteArrivalDissolve()
+    {
+        if (!_waitingForArrivalDissolve) return;
+
+        _waitingForArrivalDissolve = false;
+        if (double.IsPositiveInfinity(_spawnAllowedAt))
+            _spawnAllowedAt = Time.timeAsDouble + ArrivalSpawnDelay;
+    }
+
+    /// <summary>
+    /// 디졸브 완료 이후 접수된 지면 클릭으로 추가 스폰 대기 해제
+    /// </summary>
+    public void AcceptArrivalGroundClick()
+    {
+        if (!_waitingForArrivalDissolve)
+            _spawnAllowedAt = 0d;
     }
 
     /// <summary>
@@ -208,6 +245,8 @@ public class NodeProgress : MonoBehaviour
         _cleared = null;
         _activeArea = -1;
         _hasFailure = false;
+        _waitingForArrivalDissolve = false;
+        _spawnAllowedAt = 0d;
         IsNodeCleared = false;
     }
 }

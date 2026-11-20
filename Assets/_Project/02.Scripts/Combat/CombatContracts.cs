@@ -90,6 +90,8 @@ public readonly struct CombatActionInfo
     /// <summary>입력 당시의 지정 위치, HasWorldPosition이 true일 때 사용</summary>
     public Vector3 WorldPosition { get; }
     public bool HasWorldPosition { get; }
+    /// <summary>재생할 모션, 별도 지정이 없으면 스킬의 MotionClip</summary>
+    public AnimationClip MotionClip { get; }
 
     /// <summary>확정된 행동 정보 구성</summary>
     /// <param name="id">행동 식별 번호</param>
@@ -101,7 +103,8 @@ public readonly struct CombatActionInfo
     /// <param name="direction">확정된 행동 방향</param>
     /// <param name="worldPosition">입력 당시의 지정 위치</param>
     /// <param name="hasWorldPosition">지정 좌표 보유 여부</param>
-    public CombatActionInfo(long id, CombatActionKind kind, CombatTarget target, SkillDefinition skill, double startedAt, float duration, Vector3 direction, Vector3 worldPosition, bool hasWorldPosition)
+    /// <param name="motionClip">기본 공격 콤보 단계 모션, null이면 스킬의 MotionClip</param>
+    public CombatActionInfo(long id, CombatActionKind kind, CombatTarget target, SkillDefinition skill, double startedAt, float duration, Vector3 direction, Vector3 worldPosition, bool hasWorldPosition, AnimationClip motionClip = null)
     {
         Id = id;
         Kind = kind;
@@ -112,5 +115,6 @@ public readonly struct CombatActionInfo
         Direction = direction;
         WorldPosition = hasWorldPosition ? worldPosition : default;
         HasWorldPosition = hasWorldPosition;
+        MotionClip = motionClip != null ? motionClip : (skill != null ? skill.MotionClip : null);
     }
 }

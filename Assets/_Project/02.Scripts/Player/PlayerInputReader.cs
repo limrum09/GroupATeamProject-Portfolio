@@ -14,6 +14,7 @@ public sealed class PlayerInputReader : MonoBehaviour
     [SerializeField] LayerMask _worldMask;
     [SerializeField] LayerMask _skillAimMask;
     [SerializeField, Min(1f)] float _rayDistance = 500f;
+    [SerializeField, Min(0.05f)] float _holdMoveInterval = 0.1f;
 
     [Header("----- 월드 상호작용 입력 -----")]
     [SerializeField] LayerMask _interactionMask = ~0;
@@ -34,6 +35,10 @@ public sealed class PlayerInputReader : MonoBehaviour
     InputAction _interactAction;
 
     readonly InputAction[] _skillActions = new InputAction[4];
+
+    // 월드에서 시작한 이동 버튼 홀드의 지속 여부와 다음 재요청 시각
+    bool _holdMoving;
+    double _nextHoldMoveAt;
 
     // 접수된 이동 클릭 위치와 공격 이동 여부
     public event System.Action<Vector3, bool> OnGroundClickAccepted;
@@ -64,6 +69,7 @@ public sealed class PlayerInputReader : MonoBehaviour
     void OnDisable()
     {
         AttackModeHeld = false;
+        _holdMoving = false;
     }
 
     void Update()
@@ -71,7 +77,10 @@ public sealed class PlayerInputReader : MonoBehaviour
         AttackModeHeld = false;
 
         if (!_controller.CanAcceptCommands)
+        {
+            _holdMoving = false;
             return;
+        }
 
         bool hasPointer = _pointAction.enabled && _pointAction.controls.Count > 0;
 
@@ -113,6 +122,22 @@ public sealed class PlayerInputReader : MonoBehaviour
         if (!hasPointer)
             return;
 
+        if (_holdMoving)
+        {
+            if (!_moveAction.IsPressed())
+            {
+                _holdMoving = false;
+            }
+            else if (!_moveAction.WasPressedThisFrame() && Time.timeAsDouble >= _nextHoldMoveAt)
+            {
+                _nextHoldMoveAt = Time.timeAsDouble + _holdMoveInterval;
+
+                // 홀드 중 재요청은 클릭 표시 없이 목적지만 갱신
+                if (TryReadPointer(screenPosition, out Vector3 holdPosition, out _))
+                    _controller.RequestMove(holdPosition);
+            }
+        }
+
         bool attackClicked = _attackAction.WasPressedThisFrame();
         bool moveClicked = _moveAction.WasPressedThisFrame();
 
@@ -131,12 +156,24 @@ public sealed class PlayerInputReader : MonoBehaviour
         if (moveClicked)
         {
             if (_controller.RequestMove(position))
+            {
                 OnGroundClickAccepted?.Invoke(position, false);
+
+                // UI에서 소비되지 않은 월드 클릭부터 홀드 이동 시작
+                _holdMoving = true;
+                _nextHoldMoveAt = Time.timeAsDouble + _holdMoveInterval;
+            }
         }
         else
         {
-            if (_controller.RequestAttack(position, target) && target == null)
-                OnGroundClickAccepted?.Invoke(position, true);
+            if (_controller.RequestAttack(position, target))
+            {
+                // 접수된 공격 명령을 홀드 재요청이 덮어쓰지 않도록 중단
+                _holdMoving = false;
+
+                if (target == null)
+                    OnGroundClickAccepted?.Invoke(position, true);
+            }
         }
     }
 

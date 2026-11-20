@@ -14,6 +14,8 @@ public class WorldGraphUIController : MonoBehaviour
     bool _cancelInputRouted;
     SessionProgressManager _world;
 
+    public event Action<bool> OnVisibilityChanged;
+
     void LateUpdate()
     {
         if (_world == null || !_view.IsOpen || Time.timeScale <= 0f)
@@ -31,12 +33,19 @@ public class WorldGraphUIController : MonoBehaviour
             TryHandleCancel();
     }
 
+    void ForwardVisibilityChanged(bool isOpen)
+    {
+        OnVisibilityChanged?.Invoke(isOpen);
+    }
+
     /// <summary>
     /// 월드 진행과 지도 화면 연결
     /// </summary>
     /// <param name="world">표시할 월드 진행 담당자</param>
     /// <param name="actor">이동 요청 플레이어, 플레이어 없는 화면에서는 생략 가능</param>
-    public void Bind(SessionProgressManager world, SkillLoadout actor)
+    /// <param name="requestTravel">화면 연출과 함께 이동을 접수할 담당자, 즉시 이동이면 생략</param>
+    public void Bind(SessionProgressManager world, SkillLoadout actor,
+        Func<int, SkillLoadout, SessionProgressManager.MapTravelResult> requestTravel = null)
     {
         if (world == null) throw new ArgumentNullException(nameof(world));
         if (_view == null) throw new MissingReferenceException("WorldGraphView 연결 필요");
@@ -44,7 +53,8 @@ public class WorldGraphUIController : MonoBehaviour
             world.gameObject.scene != gameObject.scene || _view.gameObject.scene != gameObject.scene)
             throw new InvalidOperationException("같은 씬의 미연결 Controller와 활성 지도 화면 필요");
         _world = world;
-        _view.Bind(world, actor);
+        _view.Bind(world, actor, requestTravel);
+        _view.OnVisibilityChanged += ForwardVisibilityChanged;
     }
 
     /// <summary>
@@ -74,8 +84,18 @@ public class WorldGraphUIController : MonoBehaviour
     {
         if (!_view.IsOpen) return false;
 
-        Close();
+        if (!_view.IsFadingForTravel)
+            Close();
         return true;
+    }
+
+    /// <summary>
+    /// 워프 연출 중 지도 페이드 적용
+    /// </summary>
+    /// <param name="opacity">남은 지도 투명도</param>
+    public void SetTravelOpacity(float opacity)
+    {
+        _view.SetTravelOpacity(opacity);
     }
 
     /// <summary>
@@ -92,6 +112,9 @@ public class WorldGraphUIController : MonoBehaviour
     public void Unbind()
     {
         _world = null;
-        if (_view != null) _view.Unbind();
+        if (_view == null) return;
+
+        _view.OnVisibilityChanged -= ForwardVisibilityChanged;
+        _view.Unbind();
     }
 }

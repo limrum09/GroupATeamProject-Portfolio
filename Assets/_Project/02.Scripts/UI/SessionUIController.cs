@@ -16,9 +16,6 @@ public class SessionUIController : MonoBehaviour
     [Tooltip("다음 월드 전환 화면이 없는 독립 테스트에서는 생략 가능")]
     [SerializeField] NextWorldUIController _nextWorld;
 
-    [Tooltip("클리어 화면이 없는 독립 테스트에서는 생략 가능")]
-    [SerializeField] RunClearUIController _runClear;
-
     [Header("----- 선택 기능: 스킬 HUD -----")]
     [Tooltip("HUD 없는 독립 테스트에서는 생략 가능, 정식 런에서는 필수")]
     [SerializeField] SkillBarUIController _skillHud;
@@ -36,10 +33,17 @@ public class SessionUIController : MonoBehaviour
     [Tooltip("발밑 링을 구성하지 않은 독립 테스트 씬에서는 생략 가능")]
     [SerializeField] CombatantRingUIController _combatantRings;
 
+    [Header("----- 월드맵과 워프 연출 중 제어할 HUD -----")]
+    [SerializeField] CanvasGroup[] _worldMapHudGroups = Array.Empty<CanvasGroup>();
+
+    readonly Dictionary<CanvasGroup, (float Alpha, bool Interactable, bool BlocksRaycasts)>
+        _hudBeforeMap = new Dictionary<CanvasGroup, (float, bool, bool)>();
+
     InputAction _openMapAction;
     bool _bound;
     bool _shopPresentationActive;
     bool _combatPanelWasActive;
+    bool _showingWarp;
 
     public event Action<bool> OnShopStateChanged;
 
@@ -50,12 +54,11 @@ public class SessionUIController : MonoBehaviour
 
     void LateUpdate()
     {
-        if (!_bound || Time.timeScale <= 0f || IsShopOpen ||
+        if (!_bound || _showingWarp || Time.timeScale <= 0f || IsShopOpen ||
             !_openMapAction.WasPressedThisFrame())
             return;
 
-        if ((_nextWorld != null && HasVisibleCanvas(_nextWorld)) ||
-            (_runClear != null && HasVisibleCanvas(_runClear)))
+        if (_nextWorld != null && HasVisibleCanvas(_nextWorld))
             return;
 
         if (!_worldGraph.TryHandleCancel())
@@ -81,6 +84,12 @@ public class SessionUIController : MonoBehaviour
     {
         if (_shop == null || _worldGraph == null)
             throw new MissingReferenceException($"{name}: 상점과 월드맵 Controller 연결 필요");
+
+        foreach (CanvasGroup group in _worldMapHudGroups)
+        {
+            if (group == null)
+                throw new MissingReferenceException($"{name}: 월드맵 HUD 그룹 연결 필요");
+        }
     }
     void HandleShopOpening()
     {
@@ -88,9 +97,6 @@ public class SessionUIController : MonoBehaviour
 
         if (_nextWorld != null)
             _nextWorld.Close();
-
-        if (_runClear != null)
-            _runClear.Close();
 
         SetShopPresentation(true);
     }
@@ -114,6 +120,41 @@ public class SessionUIController : MonoBehaviour
             _combatPanel.SetActive(isOpen ? false : _combatPanelWasActive);
 
         OnShopStateChanged?.Invoke(isOpen);
+    }
+
+    void HandleWorldMapVisibilityChanged(bool isOpen)
+    {
+        if (!isOpen)
+        {
+            if (!_showingWarp)
+                RestoreWorldMapHud();
+            return;
+        }
+
+        foreach (CanvasGroup group in _worldMapHudGroups)
+        {
+            if (!_hudBeforeMap.TryAdd(group, (group.alpha, group.interactable, group.blocksRaycasts)))
+                continue;
+
+            group.alpha = 0f;
+            group.interactable = false;
+            group.blocksRaycasts = false;
+        }
+    }
+
+    void RestoreWorldMapHud()
+    {
+        foreach (var entry in _hudBeforeMap)
+        {
+            CanvasGroup group = entry.Key;
+            if (group == null) continue;
+
+            group.alpha = entry.Value.Alpha;
+            group.interactable = entry.Value.Interactable;
+            group.blocksRaycasts = entry.Value.BlocksRaycasts;
+        }
+
+        _hudBeforeMap.Clear();
     }
 
     static void TryCleanup(Action operation, List<Exception> errors)
@@ -153,7 +194,11 @@ public class SessionUIController : MonoBehaviour
     /// <param name="playerStatus">체력 화면의 전투 상태, 해당 화면이 없으면 생략 가능</param>
     /// <param name="economy">스킬 HUD의 유료 강화에 사용할 세션 지갑</param>
     /// <param name="player">발밑 링 표시 대상, 해당 기능이 없으면 생략 가능</param>
-    public void Bind(SessionProgressManager world, SessionShop shop, SessionShopPurchaseService purchases, SkillLoadout loadout = null, PlayerDefinition playerDefinition = null, RunLevelProgression progression = null, CharacterStatus playerStatus = null, SessionEconomyManager economy = null, PlayerActor player = null)
+    /// <param name="requestTravel">워프 연출과 지도 이동 접수 담당자, 즉시 이동이면 생략</param>
+    public void Bind(SessionProgressManager world, SessionShop shop, SessionShopPurchaseService purchases,
+        SkillLoadout loadout = null, PlayerDefinition playerDefinition = null, RunLevelProgression progression = null,
+        CharacterStatus playerStatus = null, SessionEconomyManager economy = null, PlayerActor player = null,
+        Func<int, SkillLoadout, SessionProgressManager.MapTravelResult> requestTravel = null)
     {
         ValidateReferences();
 
@@ -189,14 +234,11 @@ public class SessionUIController : MonoBehaviour
 
         try
         {
-            _worldGraph.Bind(world, loadout);
+            _worldGraph.Bind(world, loadout, requestTravel);
             _shop.Bind(shop, purchases);
 
             if (_nextWorld != null)
                 _nextWorld.Bind(world);
-
-            if (_runClear != null)
-                _runClear.Bind(world);
 
             if (_skillHud != null)
                 _skillHud.Bind(loadout, economy);
@@ -212,6 +254,7 @@ public class SessionUIController : MonoBehaviour
 
             _shop.OnOpening += HandleShopOpening;
             _shop.OnClosed += HandleShopClosed;
+            _worldGraph.OnVisibilityChanged += HandleWorldMapVisibilityChanged;
         }
         catch (Exception bindError)
         {
@@ -237,6 +280,7 @@ public class SessionUIController : MonoBehaviour
             return;
 
         _bound = false;
+        _showingWarp = false;
         List<Exception> errors = new List<Exception>();
 
         if (_combatantRings != null)
@@ -252,14 +296,16 @@ public class SessionUIController : MonoBehaviour
 
         TryCleanup(() => SetShopPresentation(false), errors);
 
-        if (_runClear != null)
-            TryCleanup(_runClear.Unbind, errors);
-
         if (_nextWorld != null)
             TryCleanup(_nextWorld.Unbind, errors);
 
         if (_worldGraph != null)
+        {
+            _worldGraph.OnVisibilityChanged -= HandleWorldMapVisibilityChanged;
             TryCleanup(_worldGraph.Unbind, errors);
+        }
+
+        TryCleanup(RestoreWorldMapHud, errors);
 
         // 전투 패널 복원 이후 HUD를 최종적으로 숨기고 해제
         if (_skillHud != null)
@@ -326,6 +372,38 @@ public class SessionUIController : MonoBehaviour
     }
 
     /// <summary>
+    /// 워프 화면 등장에 맞춘 지도 페이드
+    /// </summary>
+    /// <param name="cover">화면을 덮는 워프 투명도</param>
+    public void SetMapTravelCover(float cover)
+    {
+        if (!_bound) return;
+
+        _showingWarp = true;
+        _worldGraph.SetTravelOpacity(1f - cover);
+    }
+
+    /// <summary>
+    /// 워프 화면의 차폐 이후 HUD를 가린 상태로 지도 닫기
+    /// </summary>
+    public void HideMapUnderWarp()
+    {
+        _worldGraph.Close();
+    }
+
+    /// <summary>
+    /// 워프 화면 종료 이후 지도 닫기와 HUD 복원
+    /// </summary>
+    public void RestoreAfterMapTravel()
+    {
+        if (!_showingWarp) return;
+
+        _worldGraph.Close();
+        _showingWarp = false;
+        RestoreWorldMapHud();
+    }
+
+    /// <summary>
     /// 씬 라우터의 취소 입력 처리 여부 지정
     /// </summary>
     /// <param name="routed">라우터 연결 여부</param>
@@ -342,7 +420,7 @@ public class SessionUIController : MonoBehaviour
     public bool TryHandleCancel()
     {
         if (!_bound) throw new InvalidOperationException($"{name}: 취소 처리 전 세션 UI 연결 필요");
-        if (_runClear != null && _runClear.TryHandleCancel()) return true;
+        if (_showingWarp) return true;
         if (_nextWorld != null && _nextWorld.TryHandleCancel()) return true;
         if (_shop.TryHandleCancel()) return true;
 
@@ -356,14 +434,12 @@ public class SessionUIController : MonoBehaviour
     {
         if (!_bound)
             throw new InvalidOperationException("세션 UI 연결 필요");
+        if (_showingWarp) return;
 
         _shop.Close();
 
         if (_nextWorld != null)
             _nextWorld.Close();
-
-        if (_runClear != null)
-            _runClear.Close();
 
         _worldGraph.Open();
     }
@@ -384,31 +460,6 @@ public class SessionUIController : MonoBehaviour
         _shop.Close();
         _worldGraph.Close();
 
-        if (_runClear != null)
-            _runClear.Close();
-
         _nextWorld.Open(portal, actor);
-    }
-
-    /// <summary>
-    /// 기존 화면 종료 후 최종 보스 포탈의 클리어 창 표시
-    /// </summary>
-    /// <param name="portal">상호작용한 최종 보스 포탈</param>
-    /// <param name="actor">상호작용한 플레이어</param>
-    public void OpenRunClear(WorldPortal portal, SkillLoadout actor)
-    {
-        if (!_bound)
-            throw new InvalidOperationException("세션 UI 연결 필요");
-
-        if (_runClear == null)
-            throw new MissingReferenceException("RunClearUIController 연결 필요");
-
-        _shop.Close();
-        _worldGraph.Close();
-
-        if (_nextWorld != null)
-            _nextWorld.Close();
-
-        _runClear.Open(portal, actor);
     }
 }

@@ -8,9 +8,10 @@ public sealed class PlayerController : MonoBehaviour
     {
         None,
         Move,
-        AttackMove,
+        // 사거리 밖 대상을 추적해 1회 공격
         AttackTarget,
-        StationaryAttack
+        // 추적 중 시작한 공격 이후 전진 거리까지 이동만 남은 상태
+        Advance
     }
 
     [Header("----- 연결 -----")]
@@ -21,13 +22,38 @@ public sealed class PlayerController : MonoBehaviour
     [Header("----- 대상 탐색 -----")]
     [SerializeField] LayerMask _targetMask;
     [SerializeField, Min(0.05f)] float _repathInterval = 0.2f;
+    [SerializeField, Min(0.1f)] float _clickTargetRadius = 15f;
+
+    [Header("----- 입력 보관 -----")]
+    [Tooltip("공격 직후 이동 제한 중 누른 클릭을 보관하는 시간(초)")]
+    [SerializeField, Min(0f)] float _clickBufferDuration = 0.3f;
+
+    [Header("----- 이동 공격 -----")]
+    [Tooltip("추적 중 사거리 진입 후 공격하며 더 다가가는 거리")]
+    [SerializeField, Min(0f)] float _chaseAdvanceDistance = 1f;
+
+    [Header("----- 공격 방향 -----")]
+    [Tooltip("기본 공격 종료 후 대상을 계속 바라보는 시간(초)")]
+    [SerializeField, Min(0f)] float _attackFacingHold = 0.25f;
 
     CommandKind _command;
-    Vector3 _destination;
     CombatTarget _target;
     PlayerAnimation _animation;
     double _nextPathAt;
     bool _subscribed;
+    // 클릭으로 요청한 1회 공격의 미실행 여부, 이동 명령과 함께 유지 가능
+    bool _attackPending;
+
+    // 기본 공격 중과 종료 직후 바라볼 대상
+    CombatTarget _facingTarget;
+    long _facingActionId;
+    double _faceUntil;
+
+    bool _hasBufferedClick;
+    bool _bufferedIsAttack;
+    Vector3 _bufferedPosition;
+    CombatTarget _bufferedTarget;
+    double _bufferedUntil;
 
     public bool CanAcceptCommands => isActiveAndEnabled && _subscribed && HasPreparedAnimation && Time.timeScale > 0f && _combat.isActiveAndEnabled && _combat.Owner.IsAlive;
     public Vector3 Position => _combat.Owner.Position;
@@ -69,11 +95,16 @@ public sealed class PlayerController : MonoBehaviour
         // 취소 과정에서 발생하는 전투 이벤트를 받지 않도록 먼저 해제
         Unsubscribe();
         ResetCommand();
+        ClearBufferedClick();
+        _facingTarget = null;
 
         if (wasSubscribed)
         {
             if (_movement != null)
+            {
                 _movement.Stop();
+                _movement.ClearFacingPoint();
+            }
 
             if (_combat != null)
             {
@@ -93,13 +124,32 @@ public sealed class PlayerController : MonoBehaviour
 
     void Update()
     {
+        ReplayBufferedClick();
         UpdateCommand();
 
         CharacterStatus status = _combat.Owner.Status;
 
         _movement.Tick(status.MoveSpeed, _combat.CanMove);
 
-        _animation.Present(status.IsAlive, _movement.LocomotionSpeed, status.MoveSpeed);
+        UpdateAttackFacing();
+        _movement.TickFacing(Time.deltaTime);
+
+        _animation.Present(status.IsAlive, _movement.LocomotionSpeed, _movement.LocomotionDirection, status.MoveSpeed);
+    }
+
+    // 기본 공격 중과 종료 직후 유지 시간 동안 대상 방향, 그 밖에는 이동 방향
+    void UpdateAttackFacing()
+    {
+        bool attacking = _combat.Action == CombatActionKind.BasicAttack;
+
+        if (_facingTarget != null && _facingTarget.IsAlive && (attacking || Time.timeAsDouble < _faceUntil))
+        {
+            _movement.SetFacingPoint(_facingTarget.Position);
+            return;
+        }
+
+        _facingTarget = null;
+        _movement.ClearFacingPoint();
     }
 
     void Subscribe()
@@ -189,6 +239,11 @@ public sealed class PlayerController : MonoBehaviour
             if (!preserveMovement)
             {
                 ClearCommand();
+                ClearBufferedClick();
+
+                // 스킬 방향 전환이 기본 공격 바라보기보다 우선
+                _facingTarget = null;
+                _movement.ClearFacingPoint();
 
                 if (info.Skill.RotationMode == SkillRotationMode.FaceDirection)
                 {
@@ -200,7 +255,10 @@ public sealed class PlayerController : MonoBehaviour
         }
         else if (info.Target != null)
         {
-            _movement.Face(info.Target.Position);
+            // 이동 여부와 관계없이 공격하는 동안 대상 쪽으로 빠르게 회전
+            _facingTarget = info.Target;
+            _facingActionId = info.Id;
+            _faceUntil = double.PositiveInfinity;
         }
 
         _animation.BeginAction(info);
@@ -208,19 +266,35 @@ public sealed class PlayerController : MonoBehaviour
 
     void HandleActionEnded(long actionId, CombatActionResult result)
     {
+        // 공격 종료 후 유지 시간 동안 대상 방향 유지
+        if (actionId == _facingActionId)
+            _faceUntil = Time.timeAsDouble + _attackFacingHold;
+
         _animation.EndAction(actionId, result);
     }
 
     void HandleDeath()
     {
         ClearCommand();
-        _animation.Present(false, 0f, 0f);
+        ClearBufferedClick();
+        _facingTarget = null;
+        _movement.ClearFacingPoint();
+        _animation.Present(false, 0f, Vector3.zero, 0f);
     }
 
     void HandleArrived()
     {
-        if (_command == CommandKind.Move || _command == CommandKind.AttackMove)
-            ClearCommand();
+        if (_command != CommandKind.Move)
+            return;
+
+        // 도착 후에도 예약된 1회 공격은 유지
+        if (_attackPending)
+        {
+            _command = CommandKind.None;
+            return;
+        }
+
+        ClearCommand();
     }
 
     void UpdateCommand()
@@ -231,68 +305,51 @@ public sealed class PlayerController : MonoBehaviour
             return;
         }
 
-        if (_command == CommandKind.None || Time.timeScale <= 0f)
+        if (Time.timeScale <= 0f)
             return;
 
-        if(_command == CommandKind.StationaryAttack)
+        if (_command == CommandKind.Advance)
+            UpdateAdvance();
+
+        if (_command == CommandKind.AttackTarget)
         {
-            UpdateStationaryAttack();
-            return;
-        }
-
-        if (_combat.IsBusy)
-            return;
-
-        switch (_command)
-        {
-            case CommandKind.AttackMove:
-                UpdateAttackMove();
-                break;
-
-            case CommandKind.AttackTarget:
+            if (!_combat.IsBusy)
                 UpdateTargetAttack();
-                break;
+
+            return;
         }
+
+        if (_attackPending)
+            UpdatePendingAttack();
     }
 
-    void UpdateStationaryAttack()
+    // 추적 중 시작한 공격은 사거리 안쪽 전진 거리까지 다가가거나 이동이 끝나면 정지
+    void UpdateAdvance()
     {
-        if (_combat.CheckBasicAttackTarget(_target) != AttackTargetState.Valid)
-        {
-            // 기존 대상에 대한 미완료 기본 공격 취소
-            _combat.CancelBasicAttack();
-
-            // 현재 위치에서 공격 가능한 가장 가까운 대상으로 교체
-            _target = FindNearestTarget();
-        }
-
-        if (_target == null)
-        {
-            ClearCommand();
-            return;
-        }
-
-        if (_combat.IsBusy)
+        if (_movement.HasMoveRequest && !IsWithinAdvanceStop(_target))
             return;
 
-        TryAttackOnce(_target);
+        ClearCommand();
     }
 
-    void UpdateAttackMove()
+    // 이동 중이거나 정지한 상태에서 클릭으로 예약한 사거리 안 대상의 1회 공격
+    void UpdatePendingAttack()
     {
-        CombatTarget target = FindNearestTarget();
+        AttackTargetState state = _combat.CheckBasicAttackTarget(_target);
 
-        if(target != null)
+        // 죽었거나 사거리를 벗어난 대상은 예약 취소, 이동 중에는 추적하지 않음
+        if (state == AttackTargetState.Invalid || state == AttackTargetState.OutOfRange)
         {
-            TryAttackOnce(target);
+            _attackPending = false;
+            _target = null;
             return;
         }
 
-        if (_movement.HasMoveRequest)
+        // 시야가 가려졌거나 이전 공격 진행 중이면 다음 프레임에 재시도
+        if (state != AttackTargetState.Valid || _combat.IsBusy)
             return;
 
-        if (!TryMoveTo(_destination))
-            ClearCommand();
+        TryAttackOnce(_target, false);
     }
 
     void UpdateTargetAttack()
@@ -307,7 +364,7 @@ public sealed class PlayerController : MonoBehaviour
 
         if (state == AttackTargetState.Valid)
         {
-            TryAttackOnce(_target);
+            TryAttackOnce(_target, true);
             return;
         }
 
@@ -321,22 +378,55 @@ public sealed class PlayerController : MonoBehaviour
             ClearCommand();
     }
 
-    void TryAttackOnce(CombatTarget target)
+    void TryAttackOnce(CombatTarget target, bool advance)
     {
-        _movement.Stop();
+        // 이동 없는 공격과 전진 거리에 이미 도달한 추적은 정지 후 공격
+        if (!CanAttackWhileMoving() || (advance && IsWithinAdvanceStop(target)))
+            _movement.Stop();
 
+        // 공격 대기 시간 중이면 예약 유지 후 다음 프레임에 재시도
         if (!_combat.TryAttack(target))
             return;
 
-        _command = CommandKind.StationaryAttack;
-        _destination = default;
-        _target = target;
+        _attackPending = false;
+
+        // 이동 명령은 목적지까지 유지, 추적 공격은 전진 거리만 남기고 종료
+        if (_command == CommandKind.AttackTarget)
+        {
+            if (advance && _movement.HasMoveRequest)
+            {
+                _command = CommandKind.Advance;
+                return;
+            }
+
+            _command = CommandKind.None;
+        }
+
+        _target = null;
         _nextPathAt = 0d;
     }
 
-    CombatTarget FindNearestTarget()
+    // 이동 중이면 대상 방향과 관계없이 이동을 유지한 채 공격
+    bool CanAttackWhileMoving()
     {
-        Collider[] hits = Physics.OverlapSphere(_combat.Owner.Position, _combat.AttackRange, _targetMask, QueryTriggerInteraction.Collide);
+        return _combat.MovesDuringBasicAttack && _movement.HasMoveRequest;
+    }
+
+    // 추적 이동 공격의 정지 거리 도달 여부, 사거리에서 전진 거리를 뺀 값
+    bool IsWithinAdvanceStop(CombatTarget target)
+    {
+        if (target == null)
+            return true;
+
+        float stopDistance = Mathf.Max(0f, _combat.AttackRange - _chaseAdvanceDistance);
+
+        return (target.Position - _combat.Owner.Position).sqrMagnitude <= stopDistance * stopDistance;
+    }
+
+    // 클릭 지점 주변에서 추적 가능한 가장 가까운 대상
+    CombatTarget FindNearestTarget(Vector3 center, float radius)
+    {
+        Collider[] hits = Physics.OverlapSphere(center, radius, _targetMask, QueryTriggerInteraction.Collide);
 
         CombatTarget nearest = null;
         float nearestDistanceSquared = float.PositiveInfinity;
@@ -345,12 +435,13 @@ public sealed class PlayerController : MonoBehaviour
         {
             CombatTarget candidate = hit.GetComponentInParent<CombatTarget>();
 
-            if (candidate == null || _combat.CheckBasicAttackTarget(candidate) != AttackTargetState.Valid)
-            {
+            if (candidate == null)
                 continue;
-            }
 
-            float distanceSquared = (candidate.Position - _combat.Owner.Position).sqrMagnitude;
+            if (_combat.CheckBasicAttackTarget(candidate) == AttackTargetState.Invalid)
+                continue;
+
+            float distanceSquared = (candidate.Position - center).sqrMagnitude;
 
             if (distanceSquared < nearestDistanceSquared)
             {
@@ -386,8 +477,9 @@ public sealed class PlayerController : MonoBehaviour
 
     bool ResumePreparedMove()
     {
-        // 유효한 경로 확보 이후 기존 기본 공격 취소
-        _combat.CancelBasicAttack();
+        // 유효한 경로 확보 이후 기존 기본 공격 취소, 이동 공격 허용 시 공격 유지
+        if (!_combat.MovesDuringBasicAttack)
+            _combat.CancelBasicAttack();
 
         if (!CanAcceptCommands || !_combat.CanRequestMovement)
         {
@@ -412,9 +504,8 @@ public sealed class PlayerController : MonoBehaviour
         if (!TryMoveTo(position))
             return false;
 
+        // 예약된 1회 공격은 이동 중에도 유지, 사거리 밖이면 다음 갱신에서 취소
         _command = commad;
-        _destination = position;
-        _target = null;
         _nextPathAt = 0d;
 
         return true;
@@ -423,15 +514,64 @@ public sealed class PlayerController : MonoBehaviour
     void ResetCommand()
     {
         _command = CommandKind.None;
-        _destination = default;
         _target = null;
         _nextPathAt = 0d;
+        _attackPending = false;
     }
 
     void ClearCommand()
     {
         ResetCommand();
         _movement.Stop();
+    }
+
+    // 공격 직후 이동 제한 중의 클릭만 보관, 스킬 시전과 조작 불가 상태는 제외
+    bool TryBufferClick(bool isAttack, Vector3 position, CombatTarget target)
+    {
+        if (!CanAcceptCommands || _combat.IsCasting || _clickBufferDuration <= 0f)
+            return false;
+
+        // 마지막 클릭으로 덮어쓰기
+        _hasBufferedClick = true;
+        _bufferedIsAttack = isAttack;
+        _bufferedPosition = position;
+        _bufferedTarget = target;
+        _bufferedUntil = Time.timeAsDouble + _clickBufferDuration;
+
+        return true;
+    }
+
+    void ReplayBufferedClick()
+    {
+        if (!_hasBufferedClick)
+            return;
+
+        if (Time.timeAsDouble > _bufferedUntil || !CanAcceptCommands)
+        {
+            ClearBufferedClick();
+            return;
+        }
+
+        if (!_combat.CanRequestMovement)
+            return;
+
+        bool isAttack = _bufferedIsAttack;
+        Vector3 position = _bufferedPosition;
+        CombatTarget target = _bufferedTarget;
+
+        ClearBufferedClick();
+
+        // 사라진 대상은 빈 땅 클릭으로 처리되어 주변 대상 재탐색
+        if (isAttack)
+            RequestAttack(position, target);
+        else
+            RequestMove(position);
+    }
+
+    void ClearBufferedClick()
+    {
+        _hasBufferedClick = false;
+        _bufferedTarget = null;
     }
 
     /// <summary>
@@ -478,7 +618,7 @@ public sealed class PlayerController : MonoBehaviour
     public bool RequestMove(Vector3 position)
     {
         if (!CanAcceptCommands || !_combat.CanRequestMovement)
-            return false;
+            return TryBufferClick(false, position, null);
 
         return TryStartMoveCommand(position, CommandKind.Move);
     }
@@ -510,18 +650,24 @@ public sealed class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// 지정 대상 공격 또는 빈 땅 공격 이동 명령 요청
+    /// 지정 대상 공격 또는 빈 땅 클릭 지점 주변 대상 공격, 대상이 없으면 이동 명령 요청
     /// </summary>
-    /// <param name="position">빈 땅 공격 이동의 목적지</param>
-    /// <param name="clickedTarget">고정 공격 대상, 빈 땅 클릭이면 null</param>
+    /// <param name="position">클릭 지점, 주변 대상이 없을 때의 이동 목적지</param>
+    /// <param name="clickedTarget">직접 클릭한 대상, 빈 땅 클릭이면 null</param>
     /// <returns>명령 접수 여부</returns>
     public bool RequestAttack(Vector3 position, CombatTarget clickedTarget)
     {
         if (!CanAcceptCommands || _combat.IsCasting || !_combat.CanRequestMovement)
-            return false;
+            return TryBufferClick(true, position, clickedTarget);
 
         if (clickedTarget == null)
-            return TryStartMoveCommand(position, CommandKind.AttackMove);
+        {
+            // 빈 땅 클릭은 클릭 지점에서 가장 가까운 대상 지정, 없으면 일반 이동
+            clickedTarget = FindNearestTarget(position, _clickTargetRadius);
+
+            if (clickedTarget == null)
+                return TryStartMoveCommand(position, CommandKind.Move);
+        }
 
         if (!clickedTarget.CanReceiveFrom(_combat.Owner))
             return false;
@@ -534,29 +680,35 @@ public sealed class PlayerController : MonoBehaviour
         if (state == AttackTargetState.Invalid)
             return false;
 
-        CombatActionInfo currentAction = _combat.CurrentAction;
-
-        // 같은 유효 대상에 대한 진행 중 공격의 불필요한 취소 방지
-        if (state == AttackTargetState.Valid && currentAction.Kind == CombatActionKind.BasicAttack && currentAction.Target == clickedTarget)
-            return true;
-
-        if(state == AttackTargetState.Valid)
+        if (state == AttackTargetState.Valid)
         {
-            _combat.CancelBasicAttack();
-            _movement.Stop();
+            CombatActionInfo currentAction = _combat.CurrentAction;
+
+            // 다른 대상 공격은 취소, 같은 대상 공격 중이면 끝난 뒤 다음 1회로 예약
+            if (!(currentAction.Kind == CombatActionKind.BasicAttack && currentAction.Target == clickedTarget))
+                _combat.CancelBasicAttack();
+
+            // 이동 명령은 유지, 추적·전진 중이거나 정지 상태면 그 자리에서 공격
+            if (_command != CommandKind.Move)
+            {
+                _command = CommandKind.None;
+                _movement.Stop();
+            }
+
+            _target = clickedTarget;
+            _attackPending = true;
             _nextPathAt = 0d;
-        }
-        else
-        {
-            if (!TryMoveToTarget(clickedTarget))
-                return false;
 
-            _nextPathAt = Time.timeAsDouble + _repathInterval;
+            return true;
         }
+
+        if (!TryMoveToTarget(clickedTarget))
+            return false;
 
         _command = CommandKind.AttackTarget;
-        _destination = default;
         _target = clickedTarget;
+        _attackPending = true;
+        _nextPathAt = Time.timeAsDouble + _repathInterval;
 
         return true;
     }

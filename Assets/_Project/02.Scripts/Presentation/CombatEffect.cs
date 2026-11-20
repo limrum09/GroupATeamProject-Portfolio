@@ -31,6 +31,8 @@ public sealed class CombatEffect : MonoBehaviour
     CombatEffectPool _pool;
     long _nextPlaybackId;
 
+    public event Action<CombatSource> OnAttackEffectPlayed;
+
     public int ActiveEffectCount => _playing.Count;
 
     void Awake()
@@ -118,7 +120,13 @@ public sealed class CombatEffect : MonoBehaviour
         }
     }
 
-    CombatEffectHandle PlayInternal(ParticleSystem prefab, Vector3 position, Quaternion rotation, Vector3 rotationOffset, SkillExecutionContext areaOwner, Transform areaAnchor = null, Vector3 areaPositionOffset = default, AreaEffectDefinition areaDefinition = null)
+    void NotifyAttackEffectPlayed(CombatSource source, CombatEffectHandle handle)
+    {
+        if (source.IsValid && handle.IsPlaying)
+            OnAttackEffectPlayed?.Invoke(source);
+    }
+
+    CombatEffectHandle PlayInternal(ParticleSystem prefab, Vector3 position, Quaternion rotation, Vector3 rotationOffset, SkillExecutionContext areaOwner, Transform areaAnchor = null, Vector3 areaPositionOffset = default, AreaEffectDefinition areaDefinition = null, CombatSource attackSource = default)
     {
         // 종료된 씬 재생기와 선택적 프리팹의 재생 생략
         if (this == null || !isActiveAndEnabled || prefab == null)
@@ -172,9 +180,10 @@ public sealed class CombatEffect : MonoBehaviour
 
             // 최초 재생 이후 선택적 반복 컴포넌트에 설정만 전달
             if (areaDefinition != null && entry.Root.TryGetComponent(out AreaEffectParticleRepeater repeater))
-                repeater.BeginAfterInitialPlay(areaDefinition);
-
-            return handle;
+            {
+                Action onReplayed = attackSource.IsValid ? () => NotifyAttackEffectPlayed(attackSource, handle) : null;
+                repeater.BeginAfterInitialPlay(areaDefinition, onReplayed);
+            }
         }
         catch
         {
@@ -182,6 +191,9 @@ public sealed class CombatEffect : MonoBehaviour
             Stop(playbackId);
             throw;
         }
+
+        NotifyAttackEffectPlayed(attackSource, handle);
+        return handle;
     }
 
     void StopAll()
@@ -207,7 +219,8 @@ public sealed class CombatEffect : MonoBehaviour
     /// <param name="action">확정된 행동 정보</param>
     /// <param name="origin">발동 위치 또는 탄환 발사 위치</param>
     /// <param name="rotationOffset">이펙트 로컬 회전 보정각, 도 단위</param>
-    public void PlayAction(ParticleSystem prefab, CombatActionInfo action, Vector3 origin, Vector3 rotationOffset)
+    /// <param name="attackSource">공격 이펙트의 시전자, 알림 생략 시 기본값</param>
+    public void PlayAction(ParticleSystem prefab, CombatActionInfo action, Vector3 origin, Vector3 rotationOffset, CombatSource attackSource = default)
     {
         if (prefab == null)
             return;
@@ -228,7 +241,7 @@ public sealed class CombatEffect : MonoBehaviour
         if (!projectileAction && action.Skill != null)
             position += rotation * action.Skill.EffectOffset;
 
-        Play(prefab, position, rotation, rotationOffset);
+        Play(prefab, position, rotation, rotationOffset, attackSource);
     }
 
     internal bool IsPlaying(long playbackId)
@@ -255,10 +268,11 @@ public sealed class CombatEffect : MonoBehaviour
     /// <param name="position">월드 재생 위치</param>
     /// <param name="rotation">기준 월드 회전</param>
     /// <param name="rotationOffset">연출 전용 회전 보정값</param>
+    /// <param name="attackSource">공격 이펙트의 시전자, 알림 생략 시 기본값</param>
     /// <returns>해당 재생 건의 제어 핸들, 재생 생략 시 기본값</returns>
-    public CombatEffectHandle Play(ParticleSystem prefab, Vector3 position, Quaternion rotation, Vector3 rotationOffset)
+    public CombatEffectHandle Play(ParticleSystem prefab, Vector3 position, Quaternion rotation, Vector3 rotationOffset, CombatSource attackSource = default)
     {
-        return PlayInternal(prefab, position, rotation, rotationOffset, null);
+        return PlayInternal(prefab, position, rotation, rotationOffset, null, attackSource: attackSource);
     }
 
     /// <summary>
@@ -285,7 +299,10 @@ public sealed class CombatEffect : MonoBehaviour
 
         if (execution.Action.Skill is AreaDamageSkillDefinition area)
             areaDefinition = area.AreaEffect;
+        else if (execution.Action.Skill is DashStrikeSkillDefinition dashStrike)
+            areaDefinition = dashStrike.ArrivalAreaEffect;
 
-        return PlayInternal(prefab, origin + rotation * positionOffset, rotation, rotationOffset, hasRuntime ? execution : null, followAnchor, positionOffset, areaDefinition);
+        return PlayInternal(prefab, origin + rotation * positionOffset, rotation, rotationOffset,
+            hasRuntime ? execution : null, followAnchor, positionOffset, areaDefinition, execution.Source);
     }
 }

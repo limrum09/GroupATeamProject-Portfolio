@@ -38,7 +38,7 @@ public sealed class SkillLoadout : MonoBehaviour
     {
         CharacterDefinition owner = _combat.Owner.Status.Definition;
 
-        return definition != null && !(definition is MovementSkillDefinition) && definition != owner.BasicAttackSkill && definition.IsAvailableTo(owner);
+        return definition != null && !(definition is MovementSkillDefinition) && !owner.IsBasicAttackSkill(definition) && definition.IsAvailableTo(owner);
     }
 
     bool CanEquipDefinition(SkillDefinition definition)

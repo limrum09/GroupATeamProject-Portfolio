@@ -24,6 +24,8 @@ internal static class SkillExecutor
 
             area.AreaEffect.Validate();
             ValidateAreaTracking(area);
+            if (area is RandomAreaDamageSkillDefinition randomArea)
+                ValidateRandomAreaPlacement(randomArea);
 
             return;
         }
@@ -37,6 +39,12 @@ internal static class SkillExecutor
             if (target.UseProjectile)
                 ValidateProjectileDefinition(target);
 
+            return;
+        }
+
+        if (definition is DashStrikeSkillDefinition dashStrike)
+        {
+            dashStrike.Validate();
             return;
         }
 
@@ -102,6 +110,26 @@ internal static class SkillExecutor
             throw new InvalidOperationException($"{definition.name}: FollowCaster는 Repeat 방식의 Area Effect 연결 필요");
     }
 
+    static void ValidateRandomAreaPlacement(RandomAreaDamageSkillDefinition definition)
+    {
+        if (definition.PlacementMode != AreaPlacementMode.CasterPosition ||
+            definition.DeliveryMode != AreaDeliveryMode.Direct || definition.TrackingMode != AreaTrackingMode.Fixed)
+        {
+            throw new InvalidOperationException($"{definition.name}: 무작위 배치는 CasterPosition, Direct, Fixed 설정 필요");
+        }
+
+        if (definition.CenterOnTarget && definition.TargetMode == SkillTargetMode.None)
+            throw new InvalidOperationException($"{definition.name}: 대상 주변 배치에 대상 선택 설정 필요");
+
+        float probeDistance = definition.GroundProbeHeight + definition.GroundProbeDepth;
+        if (!IsPositiveFinite(definition.PlacementRadius) || definition.GroundMask.value == 0 ||
+            !IsPositiveFinite(definition.GroundProbeHeight) || !IsPositiveFinite(definition.GroundProbeDepth) ||
+            !IsPositiveFinite(probeDistance))
+        {
+            throw new InvalidOperationException($"{definition.name}: 무작위 배치 반경과 지면 검사 설정 필요");
+        }
+    }
+
     static void ValidateProjectileMotion(TargetProjectile prefab, float speed, float lifetime, Vector3 spawnOffset, string skillName)
     {
         if (prefab == null)
@@ -141,6 +169,12 @@ internal static class SkillExecutor
         if (!IsPositiveFinite(definition.ProjectileSpeed) || !IsPositiveFinite(definition.ProjectileRadius) || !IsPositiveFinite(definition.ProjectileLifetime))
             throw new InvalidOperationException($"{definition.name}: 탄환 속도, 반경, 수명은 유한한 양수 필요");
 
+        if (definition.ProjectileBurstCount > 1 &&
+            (!IsPositiveFinite(definition.ProjectileBurstInterval) || definition.OnHitAreaEffect != null))
+        {
+            throw new InvalidOperationException($"{definition.name}: 연사에는 유한한 양수 발사 간격과 직접 적중 설정 필요");
+        }
+
         float offsetSquared = definition.ProjectileSpawnOffset.sqrMagnitude;
 
         if (float.IsNaN(offsetSquared) || float.IsInfinity(offsetSquared))
@@ -157,6 +191,11 @@ internal static class SkillExecutor
         AreaEffectDefinition effect = definition.AreaEffect;
 
         Vector3 areaOrigin = ResolveAreaOrigin(definition, origin, execution.Action);
+        if (definition is RandomAreaDamageSkillDefinition randomArea &&
+            !TryResolveRandomAreaPosition(randomArea, execution, out areaOrigin))
+        {
+            return null;
+        }
 
         Quaternion areaRotation = Quaternion.LookRotation(execution.Action.Direction, Vector3.up);
 
@@ -208,7 +247,7 @@ internal static class SkillExecutor
         AreaEffectExecutor.Execute(execution, effect, origin, rotation, power, followCaster: followCaster);
     }
 
-    static TargetProjectile ExecuteTarget(TargetDamageSkillDefinition definition, Vector3 origin, SkillExecutionContext execution)
+    static TargetProjectile ExecuteTarget(TargetDamageSkillDefinition definition, Vector3 origin, SkillExecutionContext execution, CombatTarget caster)
     {
         CombatTarget target = execution.Action.Target;
         Vector3 direction = execution.Action.Direction;
@@ -233,6 +272,20 @@ internal static class SkillExecutor
         }
 
         Vector3 spawnPosition = origin + castRotation * definition.ProjectileSpawnOffset;
+        TargetProjectile projectile = LaunchTargetProjectile(definition, execution, target, spawnPosition, direction, power);
+
+        if (definition.ProjectileBurstCount > 1)
+        {
+            ProjectileBurstRuntime.Begin(execution, caster, definition.ProjectileBurstCount - 1, definition.ProjectileBurstInterval,
+                () => LaunchTargetProjectile(definition, execution, target, spawnPosition, direction, power));
+        }
+
+        return projectile;
+    }
+
+    static TargetProjectile LaunchTargetProjectile(TargetDamageSkillDefinition definition, SkillExecutionContext execution,
+        CombatTarget target, Vector3 spawnPosition, Vector3 direction, float power)
+    {
 
         Vector3 launchDirection = direction;
 
@@ -317,14 +370,50 @@ internal static class SkillExecutor
         if (float.IsNaN(distanceSquared) || float.IsInfinity(distanceSquared) || distanceSquared > rangeSquared)
             return false;
 
-        Vector3 rayOrigin = request.WorldPosition + Vector3.up * definition.GroundProbeHeight;
+        Physics.SyncTransforms();
+        return TryProjectAreaToGround(definition, request.WorldPosition, out position);
+    }
+
+    static bool TryResolveRandomAreaPosition(RandomAreaDamageSkillDefinition definition, SkillExecutionContext execution, out Vector3 position)
+    {
+        Vector3 center = execution.SourcePosition;
+        if (definition.CenterOnTarget)
+        {
+            CombatTarget target = execution.Action.Target;
+            if (target == null || !target.CanReceiveFrom(execution.Source))
+            {
+                position = default;
+                return false;
+            }
+
+            center = target.Position;
+        }
+
+        const int maxAttempts = 12;
+        Physics.SyncTransforms();
+
+        // 바닥이 없는 후보를 제외하고 각 시전마다 새 위치 선택
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            Vector2 offset = UnityEngine.Random.insideUnitCircle * definition.PlacementRadius;
+            Vector3 candidate = center + new Vector3(offset.x, 0f, offset.y);
+            if (TryProjectAreaToGround(definition, candidate, out position))
+                return true;
+        }
+
+        position = default;
+        return false;
+    }
+
+    static bool TryProjectAreaToGround(AreaDamageSkillDefinition definition, Vector3 candidate, out Vector3 position)
+    {
+        position = default;
+        Vector3 rayOrigin = candidate + Vector3.up * definition.GroundProbeHeight;
 
         if (!IsFinite(rayOrigin))
             return false;
 
         float rayDistance = definition.GroundProbeHeight + definition.GroundProbeDepth;
-
-        Physics.SyncTransforms();
 
         if (!Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, definition.GroundMask, QueryTriggerInteraction.Ignore))
             return false;
@@ -374,9 +463,28 @@ internal static class SkillExecutor
             return ExecuteArea(area, origin, execution, caster);
 
         if (definition is TargetDamageSkillDefinition targeted)
-            return ExecuteTarget(targeted, origin, execution);
+            return ExecuteTarget(targeted, origin, execution, caster);
 
         throw new InvalidOperationException($"{definition.name}: 지원하지 않는 스킬 정의");
+    }
+
+    /// <summary>
+    /// 돌진 도착 위치 기준 범위 피해 실행
+    /// </summary>
+    /// <param name="definition">돌진 공격 설정</param>
+    /// <param name="position">이동 완료 위치</param>
+    /// <param name="execution">돌진 시작 시점의 실행 정보</param>
+    internal static void ExecuteDashStrikeArrival(DashStrikeSkillDefinition definition, Vector3 position, SkillExecutionContext execution)
+    {
+        if (!execution.CanContinue)
+            return;
+
+        AreaEffectDefinition effect = definition.ArrivalAreaEffect;
+        Quaternion rotation = Quaternion.LookRotation(execution.Action.Direction, Vector3.up);
+        float power = SkillDamageResolver.CalculatePower(execution, effect.DamageMultiplier, effect.SpellPowerMultiplier);
+
+        Physics.SyncTransforms();
+        AreaEffectExecutor.Execute(execution, effect, position, rotation, power);
     }
 
     // 스킬 없는 기존 기본 공격, 피해 계산과 적중 처리는 스킬과 공유

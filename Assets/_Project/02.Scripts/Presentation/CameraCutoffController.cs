@@ -1,14 +1,19 @@
 using System;
+using Unity.Cinemachine;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 /// <summary>
-/// °ÔÀÓ Ä«¸Ş¶óÀÇ Ä³¸¯ÅÍ °¡¸² Á¦°Å¿ë ¼ÎÀÌ´õ ÀÔ·Â °ü¸®
+/// ì§€ì •í•œ CinemachineCameraì˜ ì¶”ì  ëŒ€ìƒì„ ì‚¬ìš©í•˜ëŠ” ë‹¨ì¼ ì¶œë ¥ ì¹´ë©”ë¼ Cutoff
 /// </summary>
 [DisallowMultipleComponent]
+[RequireComponent(typeof(Camera))]
 public class CameraCutoffController : MonoBehaviour
 {
-    [Header("----- ¸¶½ºÅ© ¼³Á¤ -----")]
+    [Header("----- ì‹œë„¤ë¨¸ì‹  ì—°ê²° -----")]
+    [SerializeField] CinemachineCamera _sourceCamera;
+
+    [Header("----- ë§ˆìŠ¤í¬ ì„¤ì • -----")]
     [SerializeField, Min(0.001f)] float _radius = 0.12f;
     [SerializeField] float _targetHeight = 1f;
     [SerializeField, Min(0f)] float _depthBias = 0.1f;
@@ -18,12 +23,12 @@ public class CameraCutoffController : MonoBehaviour
     static readonly int ParametersId = Shader.PropertyToID("_CameraCutoffParameters");
 
     Camera _camera;
-    Transform _target;
-
-    public bool IsBound => _camera != null;
 
     void OnEnable()
     {
+        // ê°™ì€ ì˜¤ë¸Œì íŠ¸ì˜ í•„ìˆ˜ Cameraë§Œ ì‚¬ìš©
+        _camera = GetComponent<Camera>();
+        ValidateConfiguration();
         Shader.SetGlobalFloat(EnabledId, 0f);
 
         RenderPipelineManager.beginCameraRendering += HandleBeginCameraRendering;
@@ -34,32 +39,38 @@ public class CameraCutoffController : MonoBehaviour
     {
         RenderPipelineManager.beginCameraRendering -= HandleBeginCameraRendering;
         RenderPipelineManager.endCameraRendering -= HandleEndCameraRendering;
-
-        Unbind();
+        Shader.SetGlobalFloat(EnabledId, 0f);
+        _camera = null;
     }
 
-    void HandleBeginCameraRendering(
-        ScriptableRenderContext context, Camera renderingCamera)
+    void ValidateConfiguration()
     {
-        // ´Ù¸¥ Ä«¸Ş¶ó·ÎÀÇ ¸¶½ºÅ© »óÅÂ ÀüÆÄ ¹æÁö
-        Shader.SetGlobalFloat(EnabledId, 0f);
+        if (_camera == null || _sourceCamera == null)
+            throw new MissingReferenceException($"{name}: ê°™ì€ ì˜¤ë¸Œì íŠ¸ì˜ Cameraì™€ Source Camera ì—°ê²° í•„ìš”");
 
+        if (!IsFinite(_radius) || _radius <= 0f ||
+            !IsFinite(_targetHeight) || !IsFinite(_depthBias) || _depthBias < 0f)
+        {
+            throw new InvalidOperationException(
+                $"{name}: ìœ í•œí•œ ë§ˆìŠ¤í¬ ì„¤ì •ê³¼ ì–‘ìˆ˜ ë°˜ì§€ë¦„ ë° 0 ì´ìƒì˜ ê¹Šì´ ì—¬ìœ  í•„ìš”");
+        }
+    }
+
+    void HandleBeginCameraRendering(ScriptableRenderContext context, Camera renderingCamera)
+    {
+        // ë¯¸ë‹ˆë§µ ë“± ë‹¤ë¥¸ ì¹´ë©”ë¼ë¡œì˜ ë§ˆìŠ¤í¬ ìƒíƒœ ì „íŒŒ ë°©ì§€
+        Shader.SetGlobalFloat(EnabledId, 0f);
         if (renderingCamera != _camera) return;
 
-        if (_target == null)
-        {
-            Unbind();
-            return;
-        }
+        // ëŸ° ì¤€ë¹„ ì „ ë¯¸ì§€ì • ìƒíƒœì™€ ëŒ€ìƒ êµì²´ë¥¼ ë§¤ ë Œë” ì‹œì ì— ë°˜ì˜
+        Transform target = _sourceCamera.Follow;
+        if (target == null || !target.gameObject.activeInHierarchy) return;
 
-        Vector3 center = _target.position + Vector3.up * _targetHeight;
+        Vector3 center = target.position + Vector3.up * _targetHeight;
         Vector3 viewportPosition = _camera.WorldToViewportPoint(center);
-
-        // Ä«¸Ş¶ó µÚÂÊÀÌ³ª ±Ù°Å¸® Àı´Ü¸é ¾ÈÂÊ ´ë»ó Á¦¿Ü
         if (viewportPosition.z <= _camera.nearClipPlane) return;
 
         Shader.SetGlobalVector(TargetPositionId, new Vector4(center.x, center.y, center.z, 1f));
-        // ¹İÁö¸§, ±íÀÌ ¿©À¯, È­¸é ºñÀ²
         Shader.SetGlobalVector(ParametersId, new Vector4(_radius, _depthBias, _camera.aspect, 0f));
         Shader.SetGlobalFloat(EnabledId, 1f);
     }
@@ -73,43 +84,5 @@ public class CameraCutoffController : MonoBehaviour
     static bool IsFinite(float value)
     {
         return !float.IsNaN(value) && !float.IsInfinity(value);
-    }
-
-    /// <summary>
-    /// °°Àº ¾ÀÀÇ °ÔÀÓ Ä«¸Ş¶ó¿Í ÁØºñµÈ Ä³¸¯ÅÍ ¿¬°á
-    /// </summary>
-    /// <param name="camera">Cutoff¸¦ Àû¿ëÇÒ °ÔÀÓ Ä«¸Ş¶ó</param>
-    /// <param name="target">¸¶½ºÅ© Áß½ÉÀÇ ±âÁØ Transform</param>
-    public void Bind(Camera camera, Transform target)
-    {
-        if (camera == null)
-            throw new ArgumentNullException(nameof(camera));
-
-        if (target == null)
-            throw new ArgumentNullException(nameof(target));
-
-        if (IsBound || !isActiveAndEnabled || !camera.isActiveAndEnabled)
-            throw new InvalidOperationException(
-                "È°¼º Ä«¸Ş¶ó¿Í ¹Ì¿¬°á Cutoff ÄÄÆ÷³ÍÆ® ÇÊ¿ä");
-
-        if (camera.gameObject.scene != gameObject.scene || target.gameObject.scene != gameObject.scene)
-            throw new InvalidOperationException("°°Àº ¾ÀÀÇ Ä«¸Ş¶ó¿Í Ä³¸¯ÅÍ ¿¬°á ÇÊ¿ä");
-
-        if (!IsFinite(_radius) || _radius <= 0f || !IsFinite(_targetHeight) || !IsFinite(_depthBias) || _depthBias < 0f)
-            throw new InvalidOperationException("À¯ÇÑÇÑ ¸¶½ºÅ© ¼³Á¤°ú ¾ç¼ö ¹İÁö¸§ ¹× 0 ÀÌ»óÀÇ ±íÀÌ ¿©À¯ ÇÊ¿ä");
-
-        _camera = camera;
-        _target = target;
-    }
-
-    /// <summary>
-    /// ´ë»ó ¿¬°á ÇØÁ¦¿Í ¸¶½ºÅ© ºñÈ°¼ºÈ­
-    /// </summary>
-    public void Unbind()
-    {
-        _camera = null;
-        _target = null;
-
-        Shader.SetGlobalFloat(EnabledId, 0f);
     }
 }

@@ -21,6 +21,9 @@ public sealed class PlayerDefinition : CharacterDefinition
     [SerializeField] PlayerAnimation _runVisualPrefab;
     [SerializeField] Sprite _icon;
 
+    [Header("----- 전투 사운드 -----")]
+    [SerializeField] CombatSoundPresenter _combatSoundPrefab;
+
     [Header("----- 고정 이동 스킬 -----")]
     [SerializeField] MovementSkillDefinition _movementSkill;
 
@@ -50,6 +53,20 @@ public sealed class PlayerDefinition : CharacterDefinition
             throw new InvalidOperationException($"{name}: 외형 프리팹과 PlayerAnimation의 활성 설정 필요");
 
         return _runVisualPrefab;
+    }
+
+    /// <summary>
+    /// 전투음 사용 씬에서 생성할 캐릭터별 사운드 프리팹 검사와 조회
+    /// </summary>
+    /// <returns>루트에 전투 사운드 Presenter가 연결된 프리팹</returns>
+    public CombatSoundPresenter GetCombatSoundPrefab()
+    {
+        if (_combatSoundPrefab == null)
+            throw new MissingReferenceException($"{name}: 전투 사운드 프리팹 연결 필요");
+        if (_combatSoundPrefab.gameObject.scene.IsValid() || _combatSoundPrefab.transform.parent != null ||
+            !_combatSoundPrefab.gameObject.activeSelf || !_combatSoundPrefab.enabled)
+            throw new InvalidOperationException($"{name}: 활성 Presenter를 가진 사운드 프리팹 루트 필요");
+        return _combatSoundPrefab;
     }
 
     /// <summary>
