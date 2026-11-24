@@ -40,7 +40,7 @@ public sealed class PlayerInputReader : MonoBehaviour
     bool _holdMoving;
     double _nextHoldMoveAt;
 
-    // 접수된 이동 클릭 위치와 공격 이동 여부
+    // 접수된 이동 명령의 실제 목적지와 공격 이동 여부
     public event System.Action<Vector3, bool> OnGroundClickAccepted;
 
     public PlayerController Controller => _controller;
@@ -134,7 +134,7 @@ public sealed class PlayerInputReader : MonoBehaviour
 
                 // 홀드 중 재요청은 클릭 표시 없이 목적지만 갱신
                 if (TryReadPointer(screenPosition, out Vector3 holdPosition, out _))
-                    _controller.RequestMove(holdPosition);
+                    _controller.RequestMove(holdPosition, out _);
             }
         }
 
@@ -155,9 +155,9 @@ public sealed class PlayerInputReader : MonoBehaviour
 
         if (moveClicked)
         {
-            if (_controller.RequestMove(position))
+            if (_controller.RequestMove(position, out Vector3 destination))
             {
-                OnGroundClickAccepted?.Invoke(position, false);
+                OnGroundClickAccepted?.Invoke(destination, false);
 
                 // UI에서 소비되지 않은 월드 클릭부터 홀드 이동 시작
                 _holdMoving = true;
@@ -166,13 +166,13 @@ public sealed class PlayerInputReader : MonoBehaviour
         }
         else
         {
-            if (_controller.RequestAttack(position, target))
+            if (_controller.RequestAttack(position, target, out Vector3 destination))
             {
                 // 접수된 공격 명령을 홀드 재요청이 덮어쓰지 않도록 중단
                 _holdMoving = false;
 
                 if (target == null)
-                    OnGroundClickAccepted?.Invoke(position, true);
+                    OnGroundClickAccepted?.Invoke(destination, true);
             }
         }
     }
@@ -210,6 +210,20 @@ public sealed class PlayerInputReader : MonoBehaviour
         return -1;
     }
 
+    // 지면이 없는 화면 지점의 플레이어 높이 수평면 투영
+    bool TryProjectToPlayerPlane(Ray ray, out Vector3 position)
+    {
+        position = default;
+
+        Plane plane = new Plane(Vector3.up, _controller.Position);
+
+        if (!plane.Raycast(ray, out float distance))
+            return false;
+
+        position = ray.GetPoint(distance);
+        return true;
+    }
+
     void ReadSkillAim(Vector2 screenPosition, bool hasPointer, out Vector3 direction, out Vector3 worldPosition, out bool hasWorldPosition)
     {
         direction = _controller.Forward;
@@ -226,15 +240,10 @@ public sealed class PlayerInputReader : MonoBehaviour
         {
             worldPosition = hit.point;
         }
-        else
+        else if (!TryProjectToPlayerPlane(ray, out worldPosition))
         {
-            // 기존 방향 조준의 수평면 보정 유지
-            Plane aimPlane = new Plane(Vector3.up, origin);
-
-            if (!aimPlane.Raycast(ray, out float distance))
-                return;
-
-            worldPosition = ray.GetPoint(distance);
+            // 기존 방향 조준의 수평면 보정 유지, 투영 실패 시 조준 없음
+            return;
         }
 
         direction = worldPosition - origin;
@@ -249,7 +258,10 @@ public sealed class PlayerInputReader : MonoBehaviour
         Ray ray = _camera.ScreenPointToRay(screenPosition);
 
         if (!Physics.Raycast(ray, out RaycastHit hit, _rayDistance, _worldMask, QueryTriggerInteraction.Collide))
-            return false;
+        {
+            // 지면 밖 클릭도 이동 요청으로 전달, 실제 목적지는 이동 쪽에서 보정
+            return TryProjectToPlayerPlane(ray, out position);
+        }
 
         target = hit.collider.GetComponentInParent<CombatTarget>();
 

@@ -51,6 +51,7 @@ public sealed class MetaProgressionInitializer : MonoBehaviour
     MetaProfileSaveCoordinator _saves;
     ApplicationExitService _exit;
     IMetaProfileStore _store;
+    IServerClock _clock;
     LocalStoryUnlockStore _storyUnlocks;
 
     MetaProfileData _initialProfile;
@@ -68,7 +69,7 @@ public sealed class MetaProgressionInitializer : MonoBehaviour
     public bool IsReady => State == MetaInitializationState.Ready;
     public MetaProfileSaveCoordinator Saves => _saves;
     public bool IsExiting => _exit != null && _exit.IsProcessing;
-    public string SaveError => _exit?.ErrorMessage ?? _saves?.ErrorMessage ?? _questActions?.ErrorMessage;
+    public string SaveError => _saves?.ErrorMessage ?? _questActions?.ErrorMessage;
 
     // 메타 재화 잔액을 소유한 전용 지갑
     public MetaWallet Wallet
@@ -223,6 +224,14 @@ public sealed class MetaProgressionInitializer : MonoBehaviour
 
         return await _saves.SaveAsync();
     }
+
+    async Task<bool> ApplyDailyPeriodAsync(string periodKey)
+    {
+        if (!await _questActions.RefreshDailyQuestsAsync(periodKey))
+            return false;
+
+        return await SaveMetaChangesAsync(MetaSavePart.DailyQuests);
+    }
    
     void ValidateReferences()
     {
@@ -295,7 +304,13 @@ public sealed class MetaProgressionInitializer : MonoBehaviour
             if (_store == null)
             {
                 _boundUserId = userId;
-                _store = _storeProvider.CreateStore(userId) ?? throw new InvalidOperationException("프로필 저장소 생성 결과 필요");
+
+                // 초기화 재시도에서 한쪽만 남지 않도록 둘 다 생성한 뒤 보관
+                IMetaProfileStore store = _storeProvider.CreateStore(userId) ?? throw new InvalidOperationException("프로필 저장소 생성 결과 필요");
+                IServerClock clock = _storeProvider.CreateClock(userId) ?? throw new InvalidOperationException("시각 조회 담당 생성 결과 필요");
+
+                _store = store;
+                _clock = clock;
             }
             else if (!string.Equals(_boundUserId, userId, StringComparison.Ordinal))
             {
@@ -381,13 +396,7 @@ public sealed class MetaProgressionInitializer : MonoBehaviour
 #if UNITY_EDITOR
             quests.BindEditorDailyRefresh(async periodKey =>
             {
-                if (!await questActions.RefreshDailyQuestsAsync(periodKey))
-                {
-                    Debug.LogWarning(questActions.ErrorMessage, quests);
-                    return;
-                }
-
-                if (!await SaveMetaChangesAsync(MetaSavePart.DailyQuests))
+                if (!await ApplyDailyPeriodAsync(periodKey))
                     Debug.LogWarning(SaveError, quests);
             });
 #endif
@@ -437,6 +446,24 @@ public sealed class MetaProgressionInitializer : MonoBehaviour
         }
 
         return await _saves.SaveAsync(requestedParts);
+    }
+
+    /// <summary>
+    /// 서버 시각 기준 일일 주기 확인과 변경 시 새 일일 퀘스트 저장
+    /// </summary>
+    /// <returns>주기 유지 또는 새 주기 저장 완료 여부, 다른 작업 대기 중이면 false</returns>
+    public async Task<bool> RefreshDailyQuestsAsync()
+    {
+        // 미정산 결과와 저장 대기 중에는 서버 요청 없이 다음 로비 진입으로 연기
+        if (!IsReady || HasBlockingOperation() || _questActions.BlocksMetaOperations)
+            return false;
+
+        DateTime utcNow = await _clock.GetUtcNowAsync();
+
+        if (_destroyed)
+            return false;
+
+        return await ApplyDailyPeriodAsync(DailyQuestPeriod.CreateKey(utcNow));
     }
 
     /// <summary>

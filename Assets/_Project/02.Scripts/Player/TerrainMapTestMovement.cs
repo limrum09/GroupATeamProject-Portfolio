@@ -69,7 +69,7 @@ public class TerrainMapTestMovement : MonoBehaviour
             Ray ray = _camera.ScreenPointToRay(mouse.position.ReadValue());
             if (Physics.Raycast(ray, out RaycastHit hit, _camera.farClipPlane,
                     Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) &&
-                hit.collider is TerrainCollider && _movement.TryPrepareMove(hit.point))
+                hit.collider is TerrainCollider && _movement.TryPrepareMove(hit.point, out _))
             {
                 _movement.ResumeMove(_definition.MoveSpeed);
             }

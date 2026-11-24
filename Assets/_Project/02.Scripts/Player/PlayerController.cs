@@ -453,12 +453,14 @@ public sealed class PlayerController : MonoBehaviour
         return nearest;
     }
 
-    bool TryMoveTo(Vector3 position)
+    bool TryMoveTo(Vector3 position, out Vector3 destination)
     {
+        destination = default;
+
         if (!CanAcceptCommands || !_combat.CanRequestMovement)
             return false;
 
-        if (!_movement.TryPrepareMove(position))
+        if (!_movement.TryPrepareMove(position, out destination))
             return false;
 
         return ResumePreparedMove();
@@ -499,9 +501,9 @@ public sealed class PlayerController : MonoBehaviour
         return true;
     }
 
-    bool TryStartMoveCommand(Vector3 position, CommandKind commad)
+    bool TryStartMoveCommand(Vector3 position, CommandKind commad, out Vector3 destination)
     {
-        if (!TryMoveTo(position))
+        if (!TryMoveTo(position, out destination))
             return false;
 
         // 예약된 1회 공격은 이동 중에도 유지, 사거리 밖이면 다음 갱신에서 취소
@@ -526,8 +528,10 @@ public sealed class PlayerController : MonoBehaviour
     }
 
     // 공격 직후 이동 제한 중의 클릭만 보관, 스킬 시전과 조작 불가 상태는 제외
-    bool TryBufferClick(bool isAttack, Vector3 position, CombatTarget target)
+    bool TryBufferClick(bool isAttack, Vector3 position, CombatTarget target, out Vector3 destination)
     {
+        destination = position;
+
         if (!CanAcceptCommands || _combat.IsCasting || _clickBufferDuration <= 0f)
             return false;
 
@@ -537,6 +541,10 @@ public sealed class PlayerController : MonoBehaviour
         _bufferedPosition = position;
         _bufferedTarget = target;
         _bufferedUntil = Time.timeAsDouble + _clickBufferDuration;
+
+        // 빈 땅 클릭은 재생 시 이동할 지점을 현재 위치 기준으로 미리 계산
+        if (target == null && _movement.TryResolveMoveDestination(position, out Vector3 resolved))
+            destination = resolved;
 
         return true;
     }
@@ -563,9 +571,9 @@ public sealed class PlayerController : MonoBehaviour
 
         // 사라진 대상은 빈 땅 클릭으로 처리되어 주변 대상 재탐색
         if (isAttack)
-            RequestAttack(position, target);
+            RequestAttack(position, target, out _);
         else
-            RequestMove(position);
+            RequestMove(position, out _);
     }
 
     void ClearBufferedClick()
@@ -614,13 +622,14 @@ public sealed class PlayerController : MonoBehaviour
     /// 이동 요청 검사와 공격 취소·이동 시작 조정
     /// </summary>
     /// <param name="position">이동할 월드 좌표</param>
+    /// <param name="destination">보정된 실제 목적지, 보관된 클릭은 재생 시 예상 목적지</param>
     /// <returns>이동 시작 성공 여부</returns>
-    public bool RequestMove(Vector3 position)
+    public bool RequestMove(Vector3 position, out Vector3 destination)
     {
         if (!CanAcceptCommands || !_combat.CanRequestMovement)
-            return TryBufferClick(false, position, null);
+            return TryBufferClick(false, position, null, out destination);
 
-        return TryStartMoveCommand(position, CommandKind.Move);
+        return TryStartMoveCommand(position, CommandKind.Move, out destination);
     }
 
     /// <summary>
@@ -654,11 +663,14 @@ public sealed class PlayerController : MonoBehaviour
     /// </summary>
     /// <param name="position">클릭 지점, 주변 대상이 없을 때의 이동 목적지</param>
     /// <param name="clickedTarget">직접 클릭한 대상, 빈 땅 클릭이면 null</param>
+    /// <param name="destination">이동으로 처리되면 보정된 실제 목적지, 대상 공격이면 클릭 지점</param>
     /// <returns>명령 접수 여부</returns>
-    public bool RequestAttack(Vector3 position, CombatTarget clickedTarget)
+    public bool RequestAttack(Vector3 position, CombatTarget clickedTarget, out Vector3 destination)
     {
         if (!CanAcceptCommands || _combat.IsCasting || !_combat.CanRequestMovement)
-            return TryBufferClick(true, position, clickedTarget);
+            return TryBufferClick(true, position, clickedTarget, out destination);
+
+        destination = position;
 
         if (clickedTarget == null)
         {
@@ -666,7 +678,7 @@ public sealed class PlayerController : MonoBehaviour
             clickedTarget = FindNearestTarget(position, _clickTargetRadius);
 
             if (clickedTarget == null)
-                return TryStartMoveCommand(position, CommandKind.Move);
+                return TryStartMoveCommand(position, CommandKind.Move, out destination);
         }
 
         if (!clickedTarget.CanReceiveFrom(_combat.Owner))

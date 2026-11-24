@@ -11,6 +11,8 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
     [Header("----- 이동 설정 -----")]
     [SerializeField, Min(0.01f)] float _sampleRadius = 0.5f;
     [SerializeField, Min(0.01f)] float _targetSampleRadius = 2f;
+    [Tooltip("이동 불가 지점 클릭 시 클릭 지점에서 플레이어 쪽으로 이동 가능 지점을 찾는 간격")]
+    [SerializeField, Min(0.05f)] float _blockedProbeStep = 0.5f;
     [SerializeField, Min(0.01f)] float _acceleration = 500f;
     [SerializeField, Min(0.01f)] float _arrivalDistance = 0.5f;
 
@@ -26,6 +28,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
     Vector3 _skillMoveDirection;
     const float SkillProbeStep = 0.2f;
     const float SkillPositionTolerance = 0.02f;
+    const float BlockedProbeMaxDistance = 60f;
     float _skillMoveRemaining;
     float _skillMoveSpeed;
     bool _arrivalPending;
@@ -106,16 +109,19 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
         CancelSkillMovement();
     }
 
-    bool TryPrepareMove(Vector3 position, float sampleRadius)
+    NavMeshQueryFilter CreateQueryFilter()
     {
-        if (!isActiveAndEnabled || !AgentReady)
-            return false;
-
-        NavMeshQueryFilter filter = new NavMeshQueryFilter
+        return new NavMeshQueryFilter
         {
             agentTypeID = _agent.agentTypeID,
             areaMask = _agent.areaMask
         };
+    }
+
+    // 성공 시 _path에 destination까지의 완전 경로 보관
+    bool TryFindReachablePoint(Vector3 position, float sampleRadius, NavMeshQueryFilter filter, out Vector3 destination)
+    {
+        destination = default;
 
         // 요청 종류에 따른 위치 보정 반경 적용
         if (!NavMesh.SamplePosition(position, out NavMeshHit hit, sampleRadius, filter))
@@ -125,7 +131,14 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
         if (!_agent.CalculatePath(hit.position, _path) || _path.status != NavMeshPathStatus.PathComplete)
             return false;
 
-        if (GetPreparedPathLength(hit.position) <= _arrivalDistance)
+        destination = hit.position;
+        return true;
+    }
+
+    // TryFindReachablePoint 성공 직후의 _path 기준 이동 시작
+    bool TryStartPreparedPath(Vector3 destination)
+    {
+        if (GetPreparedPathLength(destination) <= _arrivalDistance)
         {
             Stop();
 
@@ -142,6 +155,37 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
         _arrivalPending = false;
 
         return true;
+    }
+
+    // 클릭 지점에서 플레이어 쪽으로 직선을 거슬러 오며 처음 만나는 도달 가능 지점 탐색
+    bool TryFindReachablePointOnLine(Vector3 position, NavMeshQueryFilter filter, out Vector3 destination)
+    {
+        Vector3 start = _agent.nextPosition;
+
+        // 화면 밖 먼 지점의 탐색 횟수 제한
+        Vector3 far = Vector3.MoveTowards(start, position, BlockedProbeMaxDistance);
+        float distance = Vector3.Distance(start, far);
+
+        for (float offset = 0f; offset < distance; offset += _blockedProbeStep)
+        {
+            Vector3 probe = Vector3.MoveTowards(far, start, offset);
+
+            if (!TryFindReachablePoint(probe, _sampleRadius, filter, out Vector3 reachable))
+                continue;
+
+            // 찾은 구간 안에서 클릭 지점에 가장 가까운 NavMesh 경계까지 전진
+            if (NavMesh.Raycast(reachable, position, out NavMeshHit edge, filter)
+                && TryFindReachablePoint(edge.position, _sampleRadius, filter, out destination))
+            {
+                return true;
+            }
+
+            // 경계 보정 실패 시 탐색 지점의 경로 재계산
+            return TryFindReachablePoint(reachable, _sampleRadius, filter, out destination);
+        }
+
+        // 직선 전체가 이동 불가인 요청은 현재 위치 유지
+        return TryFindReachablePoint(start, _sampleRadius, filter, out destination);
     }
 
     float GetPreparedPathLength(Vector3 destination)
@@ -203,11 +247,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
         if (HasSkillBlockingOverlap(start, settings.BlockingMask))
             return false;
 
-        NavMeshQueryFilter filter = new NavMeshQueryFilter
-        {
-            agentTypeID = _agent.agentTypeID,
-            areaMask = _agent.areaMask
-        };
+        NavMeshQueryFilter filter = CreateQueryFilter();
 
         float checkedDistance = 0f;
 
@@ -319,11 +359,7 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
         // 이전 맵 비활성화 이후에도 배치 가능하도록 현재 NavMesh 연결 검사는 제외
         CancelSkillMovement();
 
-        NavMeshQueryFilter filter = new NavMeshQueryFilter
-        {
-            agentTypeID = _agent.agentTypeID,
-            areaMask = _agent.areaMask
-        };
+        NavMeshQueryFilter filter = CreateQueryFilter();
 
         if (!NavMesh.SamplePosition(destination.position, out NavMeshHit hit, _placementSampleRadius, filter))
         {
@@ -567,13 +603,36 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
     }
 
     /// <summary>
-    /// 일반 이동 목적지 검사와 경로 준비
+    /// 이동을 시작하지 않고 요청 위치에서 실제로 이동할 목적지 계산
+    /// 이동 불가 지점은 플레이어와 요청 위치를 잇는 직선 위에서 요청 위치에 가장 가까운 도달 가능 지점으로 보정
+    /// </summary>
+    /// <param name="position">요청한 월드 좌표</param>
+    /// <param name="destination">보정된 실제 목적지</param>
+    /// <returns>도달 가능한 목적지 존재 여부</returns>
+    public bool TryResolveMoveDestination(Vector3 position, out Vector3 destination)
+    {
+        destination = default;
+
+        if (!isActiveAndEnabled || !AgentReady)
+            return false;
+
+        NavMeshQueryFilter filter = CreateQueryFilter();
+
+        if (TryFindReachablePoint(position, _sampleRadius, filter, out destination))
+            return true;
+
+        return TryFindReachablePointOnLine(position, filter, out destination);
+    }
+
+    /// <summary>
+    /// 일반 이동 목적지 보정과 경로 준비
     /// </summary>
     /// <param name="position">이동할 월드 좌표</param>
+    /// <param name="destination">보정된 실제 목적지</param>
     /// <returns>경로 준비 성공 여부</returns>
-    public bool TryPrepareMove(Vector3 position)
+    public bool TryPrepareMove(Vector3 position, out Vector3 destination)
     {
-        return TryPrepareMove(position, _sampleRadius);
+        return TryResolveMoveDestination(position, out destination) && TryStartPreparedPath(destination);
     }
 
     /// <summary>
@@ -583,7 +642,11 @@ public sealed class PlayerMovement : MonoBehaviour, ICombatMovement
     /// <returns>추적 경로 준비 성공 여부</returns>
     public bool TryPrepareTargetMove(Vector3 targetPosition)
     {
-        return TryPrepareMove(targetPosition, _targetSampleRadius);
+        if (!isActiveAndEnabled || !AgentReady)
+            return false;
+
+        return TryFindReachablePoint(targetPosition, _targetSampleRadius, CreateQueryFilter(), out Vector3 destination)
+            && TryStartPreparedPath(destination);
     }
 
     /// <summary>

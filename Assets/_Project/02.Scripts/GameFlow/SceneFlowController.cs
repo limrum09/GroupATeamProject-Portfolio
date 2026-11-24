@@ -368,6 +368,22 @@ public sealed class SceneFlowController : MonoBehaviour
                         Debug.LogWarning(_metaProgression.SaveError ?? "런 정산 결과를 저장하지 못했습니다.", this);
                 }
 
+                // 정산 저장 이후 서버 날짜 기준 일일 주기 확인, 실패 시 기존 주기 유지 후 다음 로비 진입에서 재확인
+                if (!_useCharacterTestMode)
+                {
+                    _loadingScreen.SetStage("일일 퀘스트 확인 중...", loadedProgress);
+
+                    Task<bool> refresh = _metaProgression.RefreshDailyQuestsAsync();
+
+                    while (!refresh.IsCompleted)
+                        yield return null;
+
+                    if (refresh.IsFaulted)
+                        Debug.LogException(refresh.Exception.GetBaseException(), this);
+                    else if (refresh.IsCanceled || !refresh.Result)
+                        Debug.LogWarning(_metaProgression.SaveError ?? "일일 퀘스트 주기를 갱신하지 못했습니다.", this);
+                }
+
                 // 준비가 끝난 로비 표시 전 진행 바 완료 연출
                 _loadingScreen.SetStage("준비 완료", 1f);
 

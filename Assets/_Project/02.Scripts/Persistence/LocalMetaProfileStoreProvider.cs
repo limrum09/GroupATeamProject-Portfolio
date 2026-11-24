@@ -21,6 +21,16 @@ public class LocalMetaProfileStoreProvider : MetaProfileStoreProvider
     }
 
     /// <summary>
+    /// 로컬 테스트용 기기 시각 조회 담당 생성
+    /// </summary>
+    /// <param name="userId">사용자 UID, 로컬 테스트 경로는 null</param>
+    /// <returns>기기 시각 조회 담당</returns>
+    public override IServerClock CreateClock(string userId)
+    {
+        return new LocalDeviceClock();
+    }
+
+    /// <summary>
     /// 사용자별 로컬 프로필 디렉터리 조회
     /// </summary>
     /// <param name="userId">사용자 UID, 로컬 테스트 경로는 null</param>

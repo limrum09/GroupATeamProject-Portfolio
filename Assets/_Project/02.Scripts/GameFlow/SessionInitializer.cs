@@ -47,6 +47,7 @@ public class SessionInitializer : MonoBehaviour
     [SerializeField] EnemyExpRewardReceiver _expReceiver;
     [SerializeField] EnemyGoldRewardReceiver _goldReceiver;
     [SerializeField] EnemyScoreRewardReceiver _scoreReceiver;
+    [SerializeField, Tooltip("선택 기능: 적 처치 시 체력 포션 확률 드롭")] EnemyHealthPotionDropReceiver _potionDropReceiver;
 
     [Header("----- 난이도 -----")]
     [SerializeField] RunDifficultyInitializer _difficultyInitializer;
@@ -237,6 +238,10 @@ public class SessionInitializer : MonoBehaviour
         if (_playerHitScreenVfx != null &&
             (!_playerHitScreenVfx.isActiveAndEnabled || !_playerHitScreenVfx.transform.IsChildOf(_inputCamera.transform)))
             throw new InvalidOperationException($"{name}: 메인 카메라 아래의 활성 피격 화면 연출 필요");
+
+        if (_potionDropReceiver != null &&
+            (_potionDropReceiver.gameObject.scene != gameObject.scene || !_potionDropReceiver.gameObject.activeInHierarchy))
+            throw new InvalidOperationException($"{name}: 같은 씬의 활성 포션 드롭 수신 오브젝트 필요");
 
         Behaviour[] components =
         {
@@ -541,6 +546,10 @@ public class SessionInitializer : MonoBehaviour
 
         _expReceiver.enabled = false;
         _goldReceiver.enabled = false;
+
+        if (_potionDropReceiver != null)
+            _potionDropReceiver.enabled = false;
+
         _ui.InitializeForScene();
     }
 
@@ -639,6 +648,12 @@ public class SessionInitializer : MonoBehaviour
             _expReceiver.enabled = true;
             _goldReceiver.enabled = true;
 
+            if (_potionDropReceiver != null)
+            {
+                _potionDropReceiver.Bind(target);
+                _potionDropReceiver.enabled = true;
+            }
+
             _ui.OpenHud();
 
             if (!_expReceiver.IsListening || !_goldReceiver.IsListening || !_ui.IsSkillHudBound)
@@ -733,6 +748,13 @@ public class SessionInitializer : MonoBehaviour
                 TryCleanup(() => _expReceiver.enabled = false, errors);
                 TryCleanup(() => _goldReceiver.enabled = false, errors);
                 TryCleanup(_expReceiver.UnBind, errors);
+
+                if (_potionDropReceiver != null)
+                {
+                    TryCleanup(() => _potionDropReceiver.enabled = false, errors);
+                    TryCleanup(_potionDropReceiver.UnBind, errors);
+                }
+
                 TryCleanup(_ui.CloseHud, errors);
 
                 _world.OnPlacementRequested -= HandlePlacement;
